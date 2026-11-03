@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-docsmith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docsmith}
+      POSTGRES_DB: ${POSTGRES_DB:-docsmith}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docsmith} -d ${POSTGRES_DB:-docsmith}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [default, postgres-net]
+
+  backend:
+    build: ./backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-docsmith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docsmith}
+      POSTGRES_DB: ${POSTGRES_DB:-docsmith}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      AUTHORIZED_USERS: ${AUTHORIZED_USERS:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8000/api/google/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/app:/app/backend/app
+      - ./backend/alembic:/app/backend/alembic
+      - ./backend/alembic.ini:/app/backend/alembic.ini
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default, postgres-net]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    environment:
+      API_PROXY_ORIGIN: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    depends_on: [backend]
+    networks: [default]
+
+volumes:
+  postgres_data:
+
+networks:
+  postgres-net:
+    external: true

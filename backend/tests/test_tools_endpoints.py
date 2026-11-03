@@ -1,0 +1,349 @@
+"""Tool endpoints with a mocked Google provider (request/response contract)."""
+
+import pytest
+
+from app.services import document_service
+
+SAMPLE_DOC_JSON = {
+    "documentId": "doc123",
+    "title": "Sample",
+    "revisionId": "rev-1",
+    "body": {
+        "content": [
+            {"sectionBreak": {}},
+            {
+                "startIndex": 1,
+                "endIndex": 9,
+                "paragraph": {
+                    "paragraphStyle": {"namedStyleType": "HEADING_1"},
+                    "elements": [{"textRun": {"content": "Intro\n", "textStyle": {}}}],
+                },
+            },
+            {
+                "startIndex": 9,
+                "endIndex": 30,
+                "paragraph": {
+                    "elements": [
+                        {"textRun": {"content": "First paragraph\n", "textStyle": {}}}
+                    ]
+                },
+            },
+            {
+                "startIndex": 30,
+                "endIndex": 55,
+                "paragraph": {
+                    "paragraphStyle": {"namedStyleType": "HEADING_1"},
+                    "elements": [{"textRun": {"content": "Details\n", "textStyle": {}}}],
+                },
+            },
+            {
+                "startIndex": 55,
+                "endIndex": 75,
+                "paragraph": {
+                    "elements": [{"textRun": {"content": "Details body\n", "textStyle": {}}}]
+                },
+            },
+        ]
+    },
+}
+
+
+class FakeProvider:
+    """Records calls; returns canned documents."""
+
+    def __init__(self):
+        self.docs = {"doc123": dict(SAMPLE_DOC_JSON)}
+        self.revision = "rev-1"
+        self.created: list[dict] = []
+        self.batches: list[list[dict]] = []
+        self.trashed: list[str] = []
+        self.plan_calls: list[dict] = []
+
+    def create_document(self, title):
+        return {"documentId": "new1", "title": title, "revisionId": self.revision}
+
+    def get_document(self, document_id):
+        if document_id == "missing":
+            from app.document_engine.providers.google_docs import DocNotFound
+
+            raise DocNotFound()
+        doc = self.docs.get(document_id, dict(SAMPLE_DOC_JSON))
+        doc = dict(doc)
+        doc["revisionId"] = self.revision
+        return doc
+
+    def batch_update(self, document_id, requests, required_revision_id=None):
+        self.batches.append([dict(r) for r in requests])
+        self.revision = "rev-after-write"
+        return {"writeControl": {"requiredRevisionId": self.revision}}
+
+    def execute_plan(self, document_id, steps, start_cursor, theme, required_revision_id=None):
+        self.plan_calls.append(
+            {"document_id": document_id, "steps": steps, "start_cursor": start_cursor}
+        )
+        self.revision = "rev-after-write"
+        return start_cursor, self.revision
+
+    def search_documents(self, query, limit=10):
+        return [
+            {
+                "id": "doc123",
+                "name": "Sample",
+                "url": "https://docs.google.com/document/d/doc123/edit",
+                "modified_time": "2026-01-01T00:00:00Z",
+            }
+        ]
+
+    def trash_document(self, document_id):
+        from app.document_engine.providers.google_docs import DocNotFound
+
+        if document_id == "missing":
+            raise DocNotFound()
+        self.trashed.append(document_id)
+
+
+@pytest.fixture()
+def fake(monkeypatch):
+    provider = FakeProvider()
+    monkeypatch.setattr(document_service, "_provider", lambda db, ctx: provider)
+    return provider
+
+
+def test_search_endpoint(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/search",
+        json={"query": "samp", "limit": 5},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    docs = res.json()["documents"]
+    assert len(docs) == 1
+    assert docs[0]["id"] == "doc123"
+    assert docs[0]["url"].endswith("/doc123/edit")
+
+
+def test_read_document(client, active_key, fake):
+    res = client.get(
+        "/api/v1/tools/documents/doc123", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == "doc123"
+    assert body["title"] == "Sample"
+    assert body["revision_id"] == "rev-1"
+    assert "# Intro" in body["markdown"]
+    assert "First paragraph" in body["markdown"]
+    outline = body["outline"]
+    assert [o["heading"] for o in outline] == ["Intro", "Details"]
+
+
+def test_read_document_not_found(client, active_key, fake):
+    res = client.get(
+        "/api/v1/tools/documents/missing", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 404
+    assert res.json()["error"] == "doc_not_found"
+
+
+def test_create_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents",
+        json={
+            "title": "Weekly report",
+            "markdown": "# Weekly report\n\nAll good.",
+            "theme": "professional",
+        },
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["document_id"] == "new1"
+    assert body["document_url"].endswith("/new1/edit")
+    assert body["summary"].startswith("Created document 'Weekly report'")
+    # document style + plan executed with cursor starting at 1
+    assert any("updateDocumentStyle" in r for r in fake.batches[0])
+    assert fake.plan_calls[0]["start_cursor"] == 1
+
+
+def test_append_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/append",
+        json={"markdown": "Appended text", "required_revision_id": "rev-1"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["revision_id"] == "rev-after-write"
+    assert "Appended" in body["summary"]
+    # appended at the position before the final paragraph's newline (75-1)
+    assert fake.plan_calls[0]["start_cursor"] == 74
+
+
+def test_append_revision_conflict(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/append",
+        json={"markdown": "Appended", "required_revision_id": "stale-rev"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 409
+    assert res.json()["error"] == "conflict_detected"
+    assert res.json()["current_revision_id"] == "rev-1"
+
+
+def test_replace_section(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={
+            "mode": "replace_section",
+            "section_heading": "Details",
+            "markdown": "New details",
+            "required_revision_id": "rev-1",
+        },
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert "Replaced section 'Details'" in res.json()["summary"]
+    # first batch: delete the section range (heading start -> EOF)
+    delete = fake.batches[0][0]["deleteContentRange"]["range"]
+    assert delete["startIndex"] == 30  # Details heading start
+    assert delete["endIndex"] == 75  # next heading of same level or EOF
+    # plan rendered at the section start
+    assert fake.plan_calls[0]["start_cursor"] == 30
+
+
+def test_replace_section_mid_document_range(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={
+            "mode": "replace_section",
+            "section_heading": "Intro",
+            "markdown": "New intro",
+        },
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    delete = fake.batches[0][0]["deleteContentRange"]["range"]
+    assert delete["startIndex"] == 1  # Intro heading start
+    assert delete["endIndex"] == 30  # next H1 (Details) start
+
+
+def test_replace_section_not_found(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={
+            "mode": "replace_section",
+            "section_heading": "Nope",
+            "markdown": "x",
+        },
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert res.json()["error"] == "invalid_request"
+    assert "outline" in res.json()
+
+
+def test_regenerate_requires_confirm(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={"mode": "regenerate", "markdown": "# Fresh\n\nNew body"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"] == "confirmation_required"
+    assert body["preview"]["title"] == "Sample"
+    assert body["preview"]["current_revision_id"] == "rev-1"
+    assert body["preview"]["new_blocks"] == 2
+    # nothing was written
+    assert fake.batches == [] and fake.plan_calls == []
+
+
+def test_regenerate_with_confirm(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={
+            "mode": "regenerate",
+            "markdown": "# Fresh\n\nNew body",
+            "confirm": True,
+            "required_revision_id": "rev-1",
+        },
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    delete = fake.batches[0][0]["deleteContentRange"]["range"]
+    # deletes everything before the final element (keeps the trailing paragraph)
+    assert delete["startIndex"] == 1
+    assert delete["endIndex"] == 75
+    assert fake.plan_calls[0]["start_cursor"] == 1
+
+
+def test_delete_requires_confirm(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/delete",
+        json={"confirm": False},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert res.json()["error"] == "confirmation_required"
+    assert fake.trashed == []
+
+
+def test_delete_with_confirm(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/delete",
+        json={"confirm": True},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.trashed == ["doc123"]
+    assert "trash" in res.json()["summary"]
+
+
+def test_update_mode_validation(client, active_key, fake):
+    res = client.patch(
+        "/api/v1/tools/documents/doc123",
+        json={"mode": "bogus"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert res.json()["error"] == "invalid_request"
+
+
+def test_key_without_google_connection_409_on_all_tools(client, user_and_headers):
+    """Tool endpoints return google_not_connected without a Google connection."""
+    created = client.post("/api/keys", json={"name": "grok"}, headers=user_and_headers).json()
+    key = created["full_key"]
+    headers = {"Authorization": f"Bearer {key}"}
+    assert (
+        client.post(
+            "/api/v1/tools/documents/search", json={"query": "x"}, headers=headers
+        ).status_code
+        == 409
+    )
+    assert client.get("/api/v1/tools/documents/doc123", headers=headers).status_code == 409
+    assert (
+        client.post(
+            "/api/v1/tools/documents", json={"title": "t", "markdown": "m"}, headers=headers
+        ).status_code
+        == 409
+    )
+    assert (
+        client.patch(
+            "/api/v1/tools/documents/doc123",
+            json={"mode": "regenerate", "markdown": "m"},
+            headers=headers,
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/api/v1/tools/documents/doc123/append", json={"markdown": "m"}, headers=headers
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/api/v1/tools/documents/doc123/delete", json={"confirm": True}, headers=headers
+        ).status_code
+        == 409
+    )
