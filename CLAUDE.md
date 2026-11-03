@@ -20,6 +20,7 @@ House-style agent instructions for the Docsmith repo.
 
 ## Rules
 
+- Never read the contents of the .env file if it exists.
 - Never commit directly to `main`; use feature branches.
 - Never commit `.env` or secrets. `ENCRYPTION_KEY`, `JWT_SECRET_KEY`, Google client
   secret live only in the panel-managed `.env`.

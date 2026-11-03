@@ -16,6 +16,7 @@ from app.models import GoogleConnection
 logger = logging.getLogger(__name__)
 
 SCOPE_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
+SCOPE_USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email"
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -35,13 +36,13 @@ def build_auth_url(user_id: uuid.UUID) -> str:
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
-        "scope": SCOPE_DRIVE_FILE,
+        "scope": f"{SCOPE_DRIVE_FILE} {SCOPE_USERINFO_EMAIL}",
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
         "state": state,
     }
-    return AUTH_URL + "?" + httpx.QueryParams(params).encode()
+    return AUTH_URL + "?" + str(httpx.QueryParams(params))
 
 
 def exchange_code(code: str) -> dict:

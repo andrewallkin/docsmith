@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import api, { setUnauthorizedHandler } from './client'
+import api, { refreshSession, setUnauthorizedHandler } from './client'
 
 export interface User {
   id: string
@@ -27,13 +27,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api
-      .post('/auth/refresh')
-      .then((res) => {
-        localStorage.setItem('token', res.data.access_token)
-        setUser(res.data.user)
+    refreshSession()
+      .then((data) => {
+        if (data) setUser(data.user)
       })
-      .catch(() => setUser(null))
       .finally(() => setLoading(false))
     setUnauthorizedHandler(() => setUser(null))
   }, [])

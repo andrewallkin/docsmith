@@ -12,17 +12,28 @@ api.interceptors.request.use((config) => {
 })
 
 let onUnauthorized: (() => void) | null = null
-let refreshing: Promise<boolean> | null = null
+let refreshing: Promise<AuthData | null> | null = null
 
-async function tryRefresh(): Promise<boolean> {
-  try {
-    const res = await axios.post('/api/auth/refresh')
-    localStorage.setItem('token', res.data.access_token)
-    return true
-  } catch {
-    localStorage.removeItem('token')
-    return false
-  }
+interface AuthData {
+  access_token: string
+  user: { id: string; email: string }
+}
+
+export function refreshSession(): Promise<AuthData | null> {
+  refreshing =
+    refreshing ??
+    axios
+      .post<AuthData>('/api/auth/refresh')
+      .then((res) => {
+        localStorage.setItem('token', res.data.access_token)
+        return res.data
+      })
+      .catch(() => {
+        localStorage.removeItem('token')
+        return null
+      })
+      .finally(() => (refreshing = null))
+  return refreshing
 }
 
 api.interceptors.response.use(
@@ -31,9 +42,8 @@ api.interceptors.response.use(
     const original = error.config as (typeof error.config & { _retried?: boolean }) | undefined
     if (error.response?.status === 401 && original && !original._retried) {
       original._retried = true
-      refreshing = refreshing ?? tryRefresh().finally(() => (refreshing = null))
-      const ok = await refreshing
-      if (ok) {
+      const data = await refreshSession()
+      if (data) {
         const token = localStorage.getItem('token')
         if (token) original.headers!.Authorization = `Bearer ${token}`
         return api.request(original)
