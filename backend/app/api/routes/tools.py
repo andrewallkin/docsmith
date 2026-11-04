@@ -64,7 +64,7 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 Markdown supports: H1-H3 headings, bold/italic, links, ordered and unordered
 lists, tables, `---` page breaks. Optional theme: `professional` (default).
 
-Only app-created and Picker-granted docs are accessible (drive.file scope).
+All files in the connected Google Drive are accessible (full drive scope).
 Mutating calls accept `required_revision_id`; stale ids return 409.
 get-or-create returns 201 on create / 200 on existing (created: true/false).
 Rename/move/copy/share/comments/folder ops do not accept required_revision_id

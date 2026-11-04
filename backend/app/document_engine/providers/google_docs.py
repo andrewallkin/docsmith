@@ -26,7 +26,7 @@ MAX_ATTEMPTS = 3
 
 
 class DocNotFound(Exception):
-    """Document missing or not accessible under drive.file scope."""
+    """Document missing or not accessible under the granted Drive scope."""
 
 
 class RevisionConflict(Exception):

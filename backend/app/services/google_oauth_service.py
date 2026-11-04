@@ -15,7 +15,7 @@ from app.models import GoogleConnection
 
 logger = logging.getLogger(__name__)
 
-SCOPE_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
+SCOPE_DRIVE = "https://www.googleapis.com/auth/drive"
 SCOPE_USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email"
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -36,7 +36,7 @@ def build_auth_url(user_id: uuid.UUID) -> str:
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
-        "scope": f"{SCOPE_DRIVE_FILE} {SCOPE_USERINFO_EMAIL}",
+        "scope": f"{SCOPE_DRIVE} {SCOPE_USERINFO_EMAIL}",
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
@@ -91,7 +91,7 @@ def upsert_connection(
         db.add(connection)
     connection.google_email = userinfo.get("email", "")
     connection.encrypted_refresh_token = encrypted
-    connection.scopes = scopes or [SCOPE_DRIVE_FILE]
+    connection.scopes = scopes or [SCOPE_DRIVE]
     connection.connected_at = datetime.now(UTC)
     connection.last_used_at = None
     connection.disconnected_at = None
@@ -109,7 +109,7 @@ def get_credentials(db: Session, connection: GoogleConnection) -> Credentials:
         token_uri=TOKEN_URL,
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
-        scopes=connection.scopes or [SCOPE_DRIVE_FILE],
+        scopes=connection.scopes or [SCOPE_DRIVE],
     )
     try:
         creds.refresh(Request())

@@ -82,7 +82,7 @@ def active_key(client, user_and_headers, db):
     connection = GoogleConnection(
         google_email="test@gmail.com",
         encrypted_refresh_token=encryption.encrypt("fake-refresh-token"),
-        scopes=["https://www.googleapis.com/auth/drive.file"],
+        scopes=["https://www.googleapis.com/auth/drive"],
     )
     from app.models import User
 

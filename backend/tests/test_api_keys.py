@@ -141,7 +141,7 @@ def test_user_isolation_between_keys(client, db, monkeypatch):
                 user_id=user.id,
                 google_email=f"{email}@gmail.com",
                 encrypted_refresh_token=encryption.encrypt(f"{email}-refresh"),
-                scopes=["https://www.googleapis.com/auth/drive.file"],
+                scopes=["https://www.googleapis.com/auth/drive"],
             )
         )
     db.commit()
