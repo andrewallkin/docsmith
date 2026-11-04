@@ -108,7 +108,7 @@ def create_document(
         raise tool_errors.conflict_detected("") from None
     except DocNotFound:
         raise tool_errors.doc_not_found(document_id) from None
-    doc = provider.get_document(document_id)
+    doc = provider.get_document_fresh(document_id)
     return {
         "document_id": document_id,
         "document_url": DOC_URL.format(document_id),

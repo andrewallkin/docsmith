@@ -73,14 +73,15 @@ def test_render_blocks_paragraph_indices():
     assert len(steps) == 1
     assert isinstance(steps[0], BatchStep)
     requests = steps[0].requests
-    assert requests[0] == {"insertText": {"location": {"index": 0}, "text": "Hello world\n"}}
+    assert requests[0] == {"insertText": {"location": {"index": 1}, "text": "Hello world\n"}}
     para_style = requests[1]["updateParagraphStyle"]
-    assert para_style["range"] == {"startIndex": 0, "endIndex": 12}
-    # run styling for "Hello world" (0..11)
+    assert para_style["range"] == {"startIndex": 1, "endIndex": 13}
+    # run styling for "Hello world" (1..12)
     text_style = requests[2]["updateTextStyle"]
-    assert text_style["range"] == {"startIndex": 0, "endIndex": 11}
+    assert text_style["range"] == {"startIndex": 1, "endIndex": 12}
     assert text_style["textStyle"]["fontSize"]["magnitude"] == 10.5
-    assert "fontFamily" in text_style["fields"]
+    assert "weightedFontFamily" in text_style["textStyle"]
+    assert "weightedFontFamily.fontFamily" in text_style["fields"]
     # cursor advanced by 12 (absolute virtual position: 1 + 12)
     assert steps[0].cursor == 13
 
@@ -101,7 +102,7 @@ def test_render_list_emits_bullets_after_all_items():
     assert [r["insertText"]["text"] for r in requests if "insertText" in r] == ["a\n", "b\n"]
     bullets = [r["createParagraphBullets"] for r in requests if "createParagraphBullets" in r]
     assert len(bullets) == 1
-    assert bullets[0]["range"] == {"startIndex": 0, "endIndex": 4}
+    assert bullets[0]["range"] == {"startIndex": 1, "endIndex": 5}
     assert bullets[0]["bulletPreset"] == "BULLET_DISC_CIRCLE_SQUARE"
 
 

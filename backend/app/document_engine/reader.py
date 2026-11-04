@@ -129,19 +129,19 @@ def document_json_to_ast(doc: dict) -> tuple[Document, list[OutlineEntry]]:
 
 
 def _collect_ordered_lists(doc: dict) -> dict[str, bool]:
-    """Numbered bullet presets use glyph types like GLYPH_DECIMAL/GLYPH_ALPHABET."""
+    """Numbered bullet presets use glyph types like DECIMAL/GLYPH_DECIMAL."""
     ordered: dict[str, bool] = {}
     for list_id, node in (doc.get("lists") or {}).items():
         nesting = (node.get("listProperties") or {}).get("nestingLevels") or []
         glyph = (nesting[0] or {}).get("glyphType", "") if nesting else ""
-        ordered[list_id] = glyph in (
-            "GLYPH_DECIMAL",
-            "GLYPH_ALPHABET",
-            "GLYPH_ROMAN",
-            "GLYPH_ROMAN_LOWER",
-            "GLYPH_ALPHABET_LOWER",
-            "GLYPH_DECIMAL_OFFSET",
-            "GLYPH_DECIMAL_CIRCLED",
+        ordered[list_id] = glyph.removeprefix("GLYPH_") in (
+            "DECIMAL",
+            "ALPHABET",
+            "ROMAN",
+            "ROMAN_LOWER",
+            "ALPHABET_LOWER",
+            "DECIMAL_OFFSET",
+            "DECIMAL_CIRCLED",
         )
     return ordered
 

@@ -49,7 +49,14 @@ def _table_md(table: Table) -> str:
 
 def ast_to_markdown(doc: Document) -> str:
     parts: list[str] = []
-    if doc.title:
+    first_heading = next((b for b in doc.children if isinstance(b, Heading)), None)
+    title_dup = (
+        doc.title
+        and first_heading is not None
+        and first_heading.level == 1
+        and _inline(first_heading.children).strip().lower() == doc.title.strip().lower()
+    )
+    if doc.title and not title_dup:
         parts.append(f"# {doc.title}")
     for block in doc.children:
         if isinstance(block, Heading):

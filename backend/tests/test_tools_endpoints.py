@@ -72,6 +72,9 @@ class FakeProvider:
         doc["revisionId"] = self.revision
         return doc
 
+    def get_document_fresh(self, document_id, attempts: int = 4):
+        return self.get_document(document_id)
+
     def batch_update(self, document_id, requests, required_revision_id=None):
         self.batches.append([dict(r) for r in requests])
         self.revision = "rev-after-write"

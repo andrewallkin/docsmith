@@ -137,7 +137,9 @@ def _render_block(plan: _PlanBuilder, block) -> None:
     elif isinstance(block, Table):
         _render_table(plan, block)
     elif isinstance(block, PageBreak):
-        plan.requests.append({"insertPageBreak": {"location": {"index": plan.cursor}}})
+        plan.requests.append(
+            {"insertPageBreak": {"location": {"index": plan.step_start + plan.cursor}}}
+        )
         plan.cursor += 1
 
 
@@ -147,7 +149,9 @@ def _finish_batch(plan: _PlanBuilder) -> None:
 
 
 def _insert_text(plan: _PlanBuilder, text: str) -> None:
-    plan.requests.append({"insertText": {"location": {"index": plan.cursor}, "text": text}})
+    plan.requests.append(
+        {"insertText": {"location": {"index": plan.step_start + plan.cursor}, "text": text}}
+    )
     plan.cursor += utf16_len(text)
 
 
@@ -155,7 +159,7 @@ def _render_runs(
     plan: _PlanBuilder, runs: list[Text], base: int, size: float, bold: bool = False
 ) -> None:
     """Emit updateTextStyle requests for runs inserted starting at relative `base`."""
-    offset = base
+    offset = plan.step_start + base
     for run in runs:
         length = utf16_len(run.content)
         if length and run.content != "\n":
@@ -168,12 +172,12 @@ def _render_runs(
                 style["italic"] = True
                 fields.append("italic")
             if run.href:
-                style["link"] = {"uri": run.href}
+                style["link"] = {"url": run.href}
                 fields.append("link")
-            style["fontFamily"] = plan.theme.font
+            style["weightedFontFamily"] = {"fontFamily": plan.theme.font}
             style["fontSize"] = _pt(size)
             style["foregroundColor"] = _colour(_rgb(plan.theme.text_colour))
-            fields.extend(["fontFamily", "fontSize", "foregroundColor"])
+            fields.extend(["weightedFontFamily.fontFamily", "fontSize", "foregroundColor"])
             plan.requests.append(
                 {
                     "updateTextStyle": {
@@ -200,7 +204,10 @@ def _render_heading(plan: _PlanBuilder, block: Heading) -> None:
     plan.requests.append(
         {
             "updateParagraphStyle": {
-                "range": {"startIndex": start, "endIndex": plan.cursor},
+                "range": {
+                    "startIndex": plan.step_start + start,
+                    "endIndex": plan.step_start + plan.cursor,
+                },
                 "paragraphStyle": {
                     "namedStyleType": NAMED_STYLES[block.level],
                     "spaceBelow": _pt(plan.theme.paragraph_spacing),
@@ -221,7 +228,10 @@ def _render_paragraph(plan: _PlanBuilder, block: Paragraph) -> None:
     plan.requests.append(
         {
             "updateParagraphStyle": {
-                "range": {"startIndex": start, "endIndex": plan.cursor},
+                "range": {
+                    "startIndex": plan.step_start + start,
+                    "endIndex": plan.step_start + plan.cursor,
+                },
                 "paragraphStyle": {"spaceBelow": _pt(plan.theme.paragraph_spacing)},
                 "fields": "spaceBelow",
             }
@@ -245,7 +255,10 @@ def _render_list(plan: _PlanBuilder, block: ListBlock) -> None:
     plan.requests.append(
         {
             "createParagraphBullets": {
-                "range": {"startIndex": ranges[0][0], "endIndex": plan.cursor},
+                "range": {
+                    "startIndex": plan.step_start + ranges[0][0],
+                    "endIndex": plan.step_start + plan.cursor,
+                },
                 "bulletPreset": preset,
             }
         }

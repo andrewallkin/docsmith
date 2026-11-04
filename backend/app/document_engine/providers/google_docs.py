@@ -85,6 +85,21 @@ class GoogleDocsProvider:
                 raise DocNotFound() from exc
             raise
 
+    def get_document_fresh(self, document_id: str, attempts: int = 4) -> dict:
+        """Read a just-created/just-written doc, retrying briefly on 404.
+
+        Google Docs occasionally returns 404/403 for a short window after
+        creation or a large batchUpdate; those are transient, unlike a get
+        on a genuinely foreign document id.
+        """
+        for attempt in range(attempts):
+            try:
+                return self.get_document(document_id)
+            except DocNotFound:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.75 * (attempt + 1))
+
     def batch_update(
         self, document_id: str, requests: list[dict], required_revision_id: str | None = None
     ) -> dict:
@@ -149,17 +164,17 @@ class GoogleDocsProvider:
         required_revision_id: str | None,
     ) -> int:
         rows, cols = step.rows, step.cols
-        # 1. structure: newlines (claimed as cell paragraphs) + insertTable
+        # structure: insertTable only. Google places the table after the
+        # paragraph containing the insertion index and gives every cell an
+        # empty paragraph; pre-inserting newlines does NOT get absorbed into
+        # cells and leaves stray empty paragraphs (verified empirically).
         self.batch_update(
             document_id,
-            [
-                {"insertText": {"location": {"index": cursor}, "text": "\n" * rows}},
-                {"insertTable": {"rows": rows, "columns": cols, "location": {"index": cursor}}},
-            ],
+            [{"insertTable": {"rows": rows, "columns": cols, "location": {"index": cursor}}}],
             required_revision_id,
         )
         # 2. read back for the actual table extent
-        doc = self.get_document(document_id)
+        doc = self.get_document_fresh(document_id)
         table_start, table_end = _find_table_at(doc, cursor)
         # 3. fill cells + styles (indices relative to table_start, with a
         #    running shift as earlier cells are filled)
@@ -188,25 +203,31 @@ class GoogleDocsProvider:
                 )
             shift += length
         if step.header:
-            for c in range(cols):
-                requests.append(
-                    {
-                        "updateTableCellStyle": {
+            requests.append(
+                {
+                    "updateTableCellStyle": {
+                        "tableRange": {
                             "tableCellLocation": {
                                 "tableStartLocation": {"index": table_start},
                                 "rowIndex": 0,
-                                "columnIndex": c,
+                                "columnIndex": 0,
                             },
-                            "tableCellCellStyle": {
-                                "backgroundColor": {
-                                    "color": {"rgbColor": _rgb_from_hex(theme.table_header_bg)}
-                                },
+                            "rowSpan": 1,
+                            "columnSpan": cols,
+                        },
+                        "tableCellStyle": {
+                            "backgroundColor": {
+                                "color": {"rgbColor": _rgb_from_hex(theme.table_header_bg)}
                             },
-                            "fields": "backgroundColor",
-                        }
+                        },
+                        "fields": "backgroundColor",
                     }
-                )
+                }
+            )
         self.batch_update(document_id, requests, required_revision_id)
+        # Cell fills grow the table (each cell gains a text unit), so re-read
+        # for the real end index; the pre-fill value is stale.
+        _, table_end = _find_table_at(self.get_document_fresh(document_id), table_start)
         return table_end
 
     # ---- drive helpers ----
@@ -274,10 +295,23 @@ def _all_cell_runs(step: TableStep):
         yield from row
 
 
-def _find_table_at(doc: dict, index: int) -> tuple[int, int]:
+def _element_at(doc: dict, index: int) -> dict | None:
+    """The top-level body element starting exactly at `index`, if any."""
     for element in doc.get("body", {}).get("content", []):
-        table = element.get("table")
-        if table and element.get("startIndex") == index:
+        if element.get("startIndex") == index:
+            return element
+    return None
+
+
+def _find_table_at(doc: dict, index: int) -> tuple[int, int]:
+    """First table element at or after `index`.
+
+    Google places an inserted table after the paragraph containing the
+    insertion index, so the table's startIndex is typically index+1, not an
+    exact match.
+    """
+    for element in doc.get("body", {}).get("content", []):
+        if "table" in element and element.get("startIndex", 0) >= index:
             return element["startIndex"], element["endIndex"]
     raise DocNotFound()
 
