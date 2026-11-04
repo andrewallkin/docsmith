@@ -41,10 +41,10 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | /api/v1/tools/documents/search | Search accessible docs (empty query = list all; optional full_text, folder_id) |
+| POST | /api/v1/tools/documents/search | Search docs (empty query = list all; optional full_text, folder_id) |
 | GET | /api/v1/tools/documents/{id} | Read content (markdown) + outline |
 | POST | /api/v1/tools/documents | Create a Google Doc from markdown |
-| POST | /api/v1/tools/documents/get-or-create | Create a doc, or return the existing one with the same title (agent-safe retries; 201 on create, 200 on existing) |
+| POST | /api/v1/tools/documents/get-or-create | Create a doc, or return the existing one with the same title |
 | PATCH | /api/v1/tools/documents/{id} | Update: replace_section or regenerate |
 | POST | /api/v1/tools/documents/{id}/append | Append markdown at end of doc |
 | POST | /api/v1/tools/documents/{id}/delete | Move doc to trash (requires confirm: true) |
