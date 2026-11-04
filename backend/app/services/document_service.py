@@ -482,10 +482,22 @@ def add_document_comment(db: Session, tool_ctx, document_id: str, content: str) 
 
 
 def _append_position(doc: dict) -> int:
-    """Index just before the final paragraph's terminating newline."""
+    """Insertion index at the end of the document body.
+
+    If the final paragraph has visible text, insert after its terminating
+    newline (hand-written docs may lack a trailing empty paragraph — inserting
+    before the newline would join the appended text onto the last line).
+    Empty final paragraphs (just a newline) take the insert before it.
+    """
     content = doc.get("body", {}).get("content", [])
     for element in reversed(content):
         if "paragraph" in element:
+            text = "".join(
+                e.get("textRun", {}).get("content", "")
+                for e in element["paragraph"].get("elements", [])
+            )
+            if text.rstrip("\n"):
+                return element["endIndex"]
             return element["endIndex"] - 1
     return 1
 

@@ -304,8 +304,8 @@ def test_append_document(client, active_key, fake):
     body = res.json()
     assert body["revision_id"] == "rev-after-write"
     assert "Appended" in body["summary"]
-    # appended at the position before the final paragraph's newline (75-1)
-    assert fake.plan_calls[0]["start_cursor"] == 74
+    # final paragraph has text, so insert after its terminating newline (75)
+    assert fake.plan_calls[0]["start_cursor"] == 75
 
 
 def test_append_revision_conflict(client, active_key, fake):
