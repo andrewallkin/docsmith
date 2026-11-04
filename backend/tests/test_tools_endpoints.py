@@ -59,9 +59,15 @@ class FakeProvider:
         self.trashed: list[str] = []
         self.plan_calls: list[dict] = []
         self.calls: list[dict] = []
+        self.existing_by_title = None
+        self.create_document_calls: list[str] = []
 
     def create_document(self, title):
+        self.create_document_calls.append(title)
         return {"documentId": "new1", "title": title, "revisionId": self.revision}
+
+    def find_by_exact_title(self, title):
+        return self.existing_by_title
 
     def get_document(self, document_id):
         if document_id == "missing":
@@ -190,6 +196,30 @@ def test_create_document(client, active_key, fake):
     # document style + plan executed with cursor starting at 1
     assert any("updateDocumentStyle" in r for r in fake.batches[0])
     assert fake.plan_calls[0]["start_cursor"] == 1
+
+
+def test_get_or_create_makes_new_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/get-or-create",
+        json={"title": "Trip Plan", "markdown": "# Trip Plan\n\nBody"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 201
+    assert res.json()["created"] is True
+
+
+def test_get_or_create_returns_existing(client, active_key, fake):
+    fake.existing_by_title = {"id": "doc1", "name": "Trip Plan", "url": "u", "modified_time": "t"}
+    res = client.post(
+        "/api/v1/tools/documents/get-or-create",
+        json={"title": "Trip Plan", "markdown": "# Trip Plan\n\nBody"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["created"] is False
+    assert body["document_id"] == "doc1"
+    assert fake.create_document_calls == []
 
 
 def test_append_document(client, active_key, fake):

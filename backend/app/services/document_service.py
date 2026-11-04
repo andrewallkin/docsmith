@@ -122,6 +122,24 @@ def create_document(
     }
 
 
+def get_or_create_document(
+    db: Session, tool_ctx, title: str, markdown: str, theme_name: str | None
+) -> dict:
+    provider = _provider(db, tool_ctx)
+    existing = provider.find_by_exact_title(title)
+    if existing is not None:
+        return {
+            "document_id": existing["id"],
+            "document_url": existing["url"],
+            "revision_id": None,
+            "summary": f"Document '{title}' already exists; returned existing document",
+            "created": False,
+        }
+    result = create_document(db, tool_ctx, title, markdown, theme_name)
+    result["created"] = True
+    return result
+
+
 def append_markdown(
     db: Session, tool_ctx, document_id: str, markdown: str, required_revision_id: str | None
 ) -> dict:

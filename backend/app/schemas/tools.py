@@ -42,6 +42,12 @@ class DocumentCreateRequest(BaseModel):
     theme: str | None = None
 
 
+class DocumentGetOrCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    markdown: str = Field(min_length=1, max_length=1_000_000)
+    theme: str | None = None
+
+
 class DocumentUpdateRequest(BaseModel):
     mode: str  # "replace_section" | "regenerate"
     section_heading: str | None = Field(default=None, max_length=300)
@@ -65,6 +71,7 @@ class MutationResponse(BaseModel):
     document_url: str
     revision_id: str | None = None
     summary: str
+    created: bool = False
 
 
 class MutationPreviewResponse(BaseModel):

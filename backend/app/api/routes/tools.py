@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import PlainTextResponse
 
 from app.api.deps import ToolAuthContext, get_tool_auth_context
@@ -6,6 +6,7 @@ from app.schemas.tools import (
     DocumentAppendRequest,
     DocumentCreateRequest,
     DocumentDeleteRequest,
+    DocumentGetOrCreateRequest,
     DocumentReadResponse,
     DocumentSearchRequest,
     DocumentSearchResponse,
@@ -84,6 +85,19 @@ def create_document(
     result = document_service.create_document(
         tool_ctx.db, tool_ctx, payload.title, payload.markdown, payload.theme
     )
+    return MutationResponse(**result)
+
+
+@router.post("/documents/get-or-create", response_model=MutationResponse)
+def get_or_create_document(
+    payload: DocumentGetOrCreateRequest,
+    response: Response,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.get_or_create_document(
+        tool_ctx.db, tool_ctx, payload.title, payload.markdown, payload.theme
+    )
+    response.status_code = 201 if result["created"] else 200
     return MutationResponse(**result)
 
 
