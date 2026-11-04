@@ -188,9 +188,10 @@ class GoogleDocsProvider:
         for r, cell_runs in enumerate(_all_cell_runs(step)):
             cell_index = _table_cell_insert_index(table_start, r // cols, r % cols, cols)
             text = "".join(run.content for run in cell_runs)
-            requests.append(
-                {"insertText": {"location": {"index": cell_index + shift}, "text": text}}
-            )
+            if text:
+                requests.append(
+                    {"insertText": {"location": {"index": cell_index + shift}, "text": text}}
+                )
             length = utf16_len(text)
             if r == 0 and step.header:
                 # header: bold, theme colour; background handled below
