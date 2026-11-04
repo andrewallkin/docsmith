@@ -3,6 +3,10 @@ from fastapi.responses import PlainTextResponse
 
 from app.api.deps import ToolAuthContext, get_tool_auth_context
 from app.schemas.tools import (
+    CommentCreateRequest,
+    CommentListResponse,
+    CommentOut,
+    CommentResponse,
     DocumentAppendRequest,
     DocumentCopyRequest,
     DocumentCreateRequest,
@@ -49,6 +53,8 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 | POST | /api/v1/tools/documents/{id}/copy | Copy a doc (optional new title) |
 | POST | /api/v1/tools/documents/{id}/share | Share doc with an email (reader/writer/commenter) |
 | GET | /api/v1/tools/documents/{id}/share | List sharing permissions on a doc |
+| GET | /api/v1/tools/documents/{id}/comments | List comments on a doc |
+| POST | /api/v1/tools/documents/{id}/comments | Add a comment to a doc |
 | GET | /api/v1/tools/documents/{id}/export | Export doc as PDF (base64, query format=pdf) |
 | POST | /api/v1/tools/folders | Create a Drive folder (optional parent_id) |
 | GET | /api/v1/tools/folders | List accessible Drive folders |
@@ -290,3 +296,30 @@ def list_permissions(
 ):
     permissions = document_service.list_permissions(tool_ctx.db, tool_ctx, document_id)
     return ShareListResponse(permissions=[PermissionOut(**p) for p in permissions])
+
+
+@router.get(
+    "/documents/{document_id}/comments", response_model=CommentListResponse
+)
+def list_comments(
+    document_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    comments = document_service.list_document_comments(tool_ctx.db, tool_ctx, document_id)
+    return CommentListResponse(comments=[CommentOut(**c) for c in comments])
+
+
+@router.post(
+    "/documents/{document_id}/comments",
+    response_model=CommentResponse,
+    status_code=201,
+)
+def add_comment(
+    document_id: str,
+    payload: CommentCreateRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.add_document_comment(
+        tool_ctx.db, tool_ctx, document_id, payload.content
+    )
+    return CommentResponse(**result)

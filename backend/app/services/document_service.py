@@ -441,6 +441,25 @@ def list_permissions(db: Session, tool_ctx, document_id: str) -> list[dict]:
     return provider.list_permissions(document_id)
 
 
+def list_document_comments(
+    db: Session, tool_ctx, document_id: str, limit: int = 50
+) -> list[dict]:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    return provider.list_comments(document_id, limit)
+
+
+def add_document_comment(db: Session, tool_ctx, document_id: str, content: str) -> dict:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    comment = provider.add_comment(document_id, content)
+    return {
+        "document_id": document_id,
+        "comment_id": comment["id"],
+        "summary": "Comment added to document",
+    }
+
+
 def _append_position(doc: dict) -> int:
     """Index just before the final paragraph's terminating newline."""
     content = doc.get("body", {}).get("content", [])

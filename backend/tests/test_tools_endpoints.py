@@ -71,6 +71,8 @@ class FakeProvider:
         self.copied: list[tuple[str, str | None]] = []
         self.permissions: list[dict] = []
         self.shared: list[tuple[str, str, str, bool]] = []
+        self.comments: list[dict] = []
+        self.added_comments: list[tuple[str, str]] = []
 
     def create_document(self, title):
         self.create_document_calls.append(title)
@@ -166,6 +168,13 @@ class FakeProvider:
 
     def list_permissions(self, file_id):
         return self.permissions
+
+    def list_comments(self, file_id, limit=50):
+        return self.comments
+
+    def add_comment(self, file_id, content):
+        self.added_comments.append((file_id, content))
+        return {"id": "c1", "content": content}
 
 
 @pytest.fixture()
@@ -546,6 +555,35 @@ def test_list_permissions(client, active_key, fake):
     )
     assert res.status_code == 200
     assert res.json()["permissions"][0]["email"] == "a@b.c"
+
+
+def test_list_comments(client, active_key, fake):
+    fake.comments = [
+        {
+            "id": "c1",
+            "author": "Me",
+            "content": "check hotels",
+            "created_time": "t",
+            "resolved": False,
+        }
+    ]
+    res = client.get(
+        "/api/v1/tools/documents/doc1/comments",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["comments"][0]["content"] == "check hotels"
+
+
+def test_add_comment(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc1/comments",
+        json={"content": "agent note"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 201
+    assert res.json()["comment_id"] == "c1"
+    assert fake.added_comments == [("doc1", "agent note")]
 
 
 def test_key_without_google_connection_409_on_all_tools(client, user_and_headers):

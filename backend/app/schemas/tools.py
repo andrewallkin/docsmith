@@ -153,3 +153,28 @@ class PermissionOut(BaseModel):
 
 class ShareListResponse(BaseModel):
     permissions: list[PermissionOut]
+
+
+# ---- comments ----
+
+
+class CommentCreateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
+
+
+class CommentResponse(BaseModel):
+    document_id: str
+    comment_id: str
+    summary: str
+
+
+class CommentOut(BaseModel):
+    id: str
+    author: str
+    content: str
+    created_time: str
+    resolved: bool
+
+
+class CommentListResponse(BaseModel):
+    comments: list[CommentOut]
