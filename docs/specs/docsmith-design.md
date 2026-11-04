@@ -319,7 +319,8 @@ No other pages. No usage logs (no audit table).
 
 - Images insertion / upload pipeline (`ImageRef` AST node reserved).
 - Headers/footers/page numbers beyond default Docs behaviour (theme margins are in scope).
-- Word/PDF providers, additional scopes (`documents`, full Drive), OAuth verification/production publishing.
+- Word/PDF providers, additional scopes (`documents`, full Drive beyond app-created/Picker-granted files), OAuth verification/production publishing.
+- Images insertion / upload pipeline remains deferred; folders, sharing, comments, copy/export/restore operate on app-created and Picker-granted files only (drive.file).
 - Usage/audit logging, billing, organisations, MCP server, xAI integration, webhooks.
 
 ---
