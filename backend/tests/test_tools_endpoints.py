@@ -1,5 +1,7 @@
 """Tool endpoints with a mocked Google provider (request/response contract)."""
 
+import base64
+
 import pytest
 
 from app.services import document_service
@@ -65,6 +67,8 @@ class FakeProvider:
         self.renamed: tuple[str, str] | None = None
         self.folders: list[dict] = []
         self.moves: list[tuple[str, str, bool]] = []
+        self.export_bytes = b""
+        self.copied: list[tuple[str, str | None]] = []
 
     def create_document(self, title):
         self.create_document_calls.append(title)
@@ -142,6 +146,17 @@ class FakeProvider:
 
     def move_file(self, file_id, add_parent_id, remove_current=True):
         self.moves.append((file_id, add_parent_id, remove_current))
+
+    def copy_document(self, file_id, new_title=None):
+        self.copied.append((file_id, new_title))
+        return {
+            "id": "copied1",
+            "name": new_title or "Sample",
+            "url": "https://docs.google.com/document/d/copied1/edit",
+        }
+
+    def export_file(self, file_id, mime="application/pdf"):
+        return self.export_bytes
 
 
 @pytest.fixture()
@@ -462,6 +477,37 @@ def test_move_document(client, active_key, fake):
     )
     assert res.status_code == 200
     assert fake.moves == [("doc1", "fld2", True)]
+
+
+def test_copy_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc1/copy",
+        json={"title": "Day 2 Plan"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 201
+    assert res.json()["document_id"] == "copied1"
+
+
+def test_export_pdf(client, active_key, fake):
+    fake.export_bytes = b"%PDF-1.4 test"
+    res = client.get(
+        "/api/v1/tools/documents/doc1/export",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert base64.b64decode(body["content_base64"]) == b"%PDF-1.4 test"
+    assert body["mime"] == "application/pdf"
+
+
+def test_export_size_cap(client, active_key, fake):
+    fake.export_bytes = b"x" * (11 * 1024 * 1024)
+    res = client.get(
+        "/api/v1/tools/documents/doc1/export",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
 
 
 def test_key_without_google_connection_409_on_all_tools(client, user_and_headers):

@@ -1,13 +1,15 @@
 """Document orchestration for the agent tool API: search / read / create /
 append / replace_section / regenerate / delete / rename / restore, plus
-Drive folder management (create / list / delete) and moving documents
-between folders.
+Drive folder management (create / list / delete), moving documents
+between folders, copying documents and PDF export.
 
 Every mutation accepts an optional required_revision_id; when supplied, the
 document's current revision is checked first (read-back) and the write is
 submitted with WriteControl.requiredRevisionId. Mutations return the new
 revision id (read back after the write).
 """
+
+import base64
 
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,7 @@ from app.services import google_oauth_service
 
 DOC_URL = "https://docs.google.com/document/d/{}/edit"
 FOLDER_URL = "https://drive.google.com/drive/folders/{}"
+EXPORT_SIZE_LIMIT = 10 * 1024 * 1024
 
 
 def _provider(db: Session, tool_ctx) -> GoogleDocsProvider:
@@ -381,6 +384,39 @@ def move_document(
         "document_id": document_id,
         "document_url": DOC_URL.format(document_id),
         "summary": f"Moved document into folder {folder_id}",
+    }
+
+
+def copy_document(db: Session, tool_ctx, document_id: str, title: str | None) -> dict:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    try:
+        copied = provider.copy_document(document_id, title)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
+    return {
+        "document_id": copied["id"],
+        "document_url": copied["url"],
+        "summary": f"Copied document as '{copied['name']}'",
+    }
+
+
+def export_document(db: Session, tool_ctx, document_id: str, file_format: str) -> dict:
+    if file_format != "pdf":
+        raise tool_errors.invalid_request("format must be 'pdf'")
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    data = provider.export_file(document_id, "application/pdf")
+    if len(data) > EXPORT_SIZE_LIMIT:
+        raise tool_errors.invalid_request(
+            f"Export too large ({len(data)} bytes); limit is {EXPORT_SIZE_LIMIT} bytes"
+        )
+    return {
+        "format": "pdf",
+        "mime": "application/pdf",
+        "size_bytes": len(data),
+        "content_base64": base64.b64encode(data).decode("ascii"),
+        "filename": "document.pdf",
     }
 
 

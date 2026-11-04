@@ -70,6 +70,18 @@ class DocumentRenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
 
 
+class DocumentCopyRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+
+
+class ExportResponse(BaseModel):
+    format: str
+    mime: str
+    size_bytes: int
+    content_base64: str
+    filename: str
+
+
 class FolderCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=300)
     parent_id: str | None = None

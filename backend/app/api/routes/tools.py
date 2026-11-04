@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import PlainTextResponse
 
 from app.api.deps import ToolAuthContext, get_tool_auth_context
 from app.schemas.tools import (
     DocumentAppendRequest,
+    DocumentCopyRequest,
     DocumentCreateRequest,
     DocumentDeleteRequest,
     DocumentGetOrCreateRequest,
@@ -14,6 +15,7 @@ from app.schemas.tools import (
     DocumentSearchResponse,
     DocumentSummary,
     DocumentUpdateRequest,
+    ExportResponse,
     FolderCreateRequest,
     FolderCreateResponse,
     FolderDeleteRequest,
@@ -40,6 +42,8 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 | POST | /api/v1/tools/documents/{id}/restore | Restore doc from trash |
 | POST | /api/v1/tools/documents/{id}/rename | Rename a doc |
 | POST | /api/v1/tools/documents/{id}/move | Move doc into a folder |
+| POST | /api/v1/tools/documents/{id}/copy | Copy a doc (optional new title) |
+| GET | /api/v1/tools/documents/{id}/export | Export doc as PDF (base64, query format=pdf) |
 | POST | /api/v1/tools/folders | Create a Drive folder (optional parent_id) |
 | GET | /api/v1/tools/folders | List accessible Drive folders |
 | POST | /api/v1/tools/folders/{id}/delete | Move folder to trash (requires confirm: true) |
@@ -237,3 +241,25 @@ def move_document(
         tool_ctx.db, tool_ctx, document_id, payload.folder_id, payload.remove_current
     )
     return MutationResponse(**result)
+
+
+@router.post("/documents/{document_id}/copy", response_model=MutationResponse, status_code=201)
+def copy_document(
+    document_id: str,
+    payload: DocumentCopyRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.copy_document(
+        tool_ctx.db, tool_ctx, document_id, payload.title
+    )
+    return MutationResponse(**result)
+
+
+@router.get("/documents/{document_id}/export", response_model=ExportResponse)
+def export_document(
+    document_id: str,
+    format: str = Query(default="pdf"),
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.export_document(tool_ctx.db, tool_ctx, document_id, format)
+    return ExportResponse(**result)
