@@ -41,7 +41,7 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | /api/v1/tools/documents/search | Search docs (empty query lists all; full_text, folder_id) |
+| POST | /api/v1/tools/documents/search | Search docs (empty query lists all; full_text) |
 | GET | /api/v1/tools/documents/{id} | Read content (markdown) + outline |
 | POST | /api/v1/tools/documents | Create a Google Doc from markdown |
 | POST | /api/v1/tools/documents/get-or-create | Create a doc, or return existing with same title |
