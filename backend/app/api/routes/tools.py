@@ -41,7 +41,7 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | /api/v1/tools/documents/search | Search docs (empty query lists all; full_text) |
+| POST | /api/v1/tools/documents/search | Search (query, full_text, folder_id; empty lists all) |
 | GET | /api/v1/tools/documents/{id} | Read content (markdown) + outline |
 | POST | /api/v1/tools/documents | Create a Google Doc from markdown |
 | POST | /api/v1/tools/documents/get-or-create | Create a doc, or return existing with same title |
@@ -66,8 +66,11 @@ lists, tables, `---` page breaks. Optional theme: `professional` (default).
 
 Only app-created and Picker-granted docs are accessible (drive.file scope).
 Mutating calls accept `required_revision_id`; stale ids return 409.
-Destructive operations (regenerate, delete) require `confirm: true` or
-return 422 with a preview.
+get-or-create returns 201 on create / 200 on existing (created: true/false).
+Rename/move/copy/share/comments/folder ops do not accept required_revision_id
+(metadata ops don't change the revision).
+Destructive operations (regenerate, delete, folder delete) require
+`confirm: true` or return 422 with a preview.
 """
 
 

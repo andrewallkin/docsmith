@@ -33,6 +33,10 @@ class RevisionConflict(Exception):
     """requiredRevisionId did not match the document's current revision."""
 
 
+class ExportTooLarge(Exception):
+    """Export rejected: file exceeds Google's ~10MB export size limit."""
+
+
 def _backoff_statuses(exc: HttpError) -> bool:
     status = exc.resp.status if exc.resp is not None else None
     return status in RETRYABLE_STATUS
@@ -251,7 +255,8 @@ class GoogleDocsProvider:
             escaped = full_text.replace("'", "\\'")
             clauses.append(f"fullText contains '{escaped}'")
         if folder_id:
-            clauses.append(f"'{folder_id}' in parents")
+            escaped = folder_id.replace("'", "\\'")
+            clauses.append(f"'{escaped}' in parents")
         clauses.append(f"mimeType = '{mime}'")
         clauses.append("trashed = " + ("true" if trashed else "false"))
         q = " and ".join(clauses)
@@ -303,33 +308,63 @@ class GoogleDocsProvider:
         ]
 
     def trash_document(self, document_id: str) -> None:
-        _with_retries(
-            lambda: self.drive.files()
-            .update(fileId=document_id, body={"trashed": True}, fields="id")
-            .execute()
-        )
+        try:
+            _with_retries(
+                lambda: self.drive.files()
+                .update(fileId=document_id, body={"trashed": True}, fields="id")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
 
     def rename_file(self, file_id: str, title: str) -> None:
-        _with_retries(
-            lambda: self.drive.files()
-            .update(fileId=file_id, body={"name": title}, fields="id")
-            .execute()
-        )
+        try:
+            _with_retries(
+                lambda: self.drive.files()
+                .update(fileId=file_id, body={"name": title}, fields="id")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
 
     def move_file(self, file_id: str, add_parent_id: str, remove_current: bool = True) -> None:
-        current = _with_retries(
-            lambda: self.drive.files().get(fileId=file_id, fields="parents").execute()
-        )
+        try:
+            current = _with_retries(
+                lambda: self.drive.files().get(fileId=file_id, fields="parents").execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         params: dict = {"fileId": file_id, "addParents": add_parent_id, "fields": "id"}
         if remove_current and current.get("parents"):
             params["removeParents"] = ",".join(current["parents"])
-        _with_retries(lambda: self.drive.files().update(**params).execute())
+        try:
+            _with_retries(lambda: self.drive.files().update(**params).execute())
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
 
     def copy_document(self, file_id: str, new_title: str | None = None) -> dict:
         body = {"name": new_title} if new_title else {}
-        result = _with_retries(
-            lambda: self.drive.files().copy(fileId=file_id, body=body).execute()
-        )
+        try:
+            result = _with_retries(
+                lambda: self.drive.files().copy(fileId=file_id, body=body).execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return {
             "id": result["id"],
             "name": result.get("name", ""),
@@ -337,22 +372,42 @@ class GoogleDocsProvider:
         }
 
     def export_file(self, file_id: str, mime: str = "application/pdf") -> bytes:
-        return _with_retries(
-            lambda: self.drive.files().export(fileId=file_id, mimeType=mime).execute()
-        )
+        try:
+            return _with_retries(
+                lambda: self.drive.files().export(fileId=file_id, mimeType=mime).execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 403 and "exportSizeLimitExceeded" in str(exc):
+                raise ExportTooLarge() from exc
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
 
     def untrash_document(self, file_id: str) -> None:
-        _with_retries(
-            lambda: self.drive.files()
-            .update(fileId=file_id, body={"trashed": False}, fields="id")
-            .execute()
-        )
+        try:
+            _with_retries(
+                lambda: self.drive.files()
+                .update(fileId=file_id, body={"trashed": False}, fields="id")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
 
     def create_folder(self, name: str, parent_id: str | None = None) -> dict:
         body: dict = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
         if parent_id:
             body["parents"] = [parent_id]
-        result = _with_retries(lambda: self.drive.files().create(body=body).execute())
+        try:
+            result = _with_retries(lambda: self.drive.files().create(body=body).execute())
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return {
             "id": result["id"],
             "name": result.get("name", ""),
@@ -375,24 +430,38 @@ class GoogleDocsProvider:
         ]
 
     def share_file(self, file_id: str, email: str, role: str, notify: bool = True) -> dict:
-        result = _with_retries(
-            lambda: self.drive.permissions()
-            .create(
-                fileId=file_id,
-                body={"type": "user", "role": role, "emailAddress": email},
-                sendNotificationEmail=notify,
-                fields="id",
+        # A 403 here means sharing is disabled for the domain/file; only 404
+        # maps to DocNotFound.
+        try:
+            result = _with_retries(
+                lambda: self.drive.permissions()
+                .create(
+                    fileId=file_id,
+                    body={"type": "user", "role": role, "emailAddress": email},
+                    sendNotificationEmail=notify,
+                    fields="id",
+                )
+                .execute()
             )
-            .execute()
-        )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return {"id": result["id"], "email": email, "role": role}
 
     def list_permissions(self, file_id: str) -> list[dict]:
-        response = _with_retries(
-            lambda: self.drive.permissions()
-            .list(fileId=file_id, fields="permissions(id,emailAddress,role,type)")
-            .execute()
-        )
+        try:
+            response = _with_retries(
+                lambda: self.drive.permissions()
+                .list(fileId=file_id, fields="permissions(id,emailAddress,role,type)")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return [
             {
                 "id": p["id"],
@@ -404,15 +473,21 @@ class GoogleDocsProvider:
         ]
 
     def list_comments(self, file_id: str, limit: int = 50) -> list[dict]:
-        response = _with_retries(
-            lambda: self.drive.comments()
-            .list(
-                fileId=file_id,
-                pageSize=min(limit, 100),
-                fields="comments(id,author(displayName),content,createdTime,resolved)",
+        try:
+            response = _with_retries(
+                lambda: self.drive.comments()
+                .list(
+                    fileId=file_id,
+                    pageSize=min(limit, 100),
+                    fields="comments(id,author(displayName),content,createdTime,resolved)",
+                )
+                .execute()
             )
-            .execute()
-        )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return [
             {
                 "id": c["id"],
@@ -425,11 +500,17 @@ class GoogleDocsProvider:
         ]
 
     def add_comment(self, file_id: str, content: str) -> dict:
-        result = _with_retries(
-            lambda: self.drive.comments()
-            .create(fileId=file_id, body={"content": content}, fields="id")
-            .execute()
-        )
+        try:
+            result = _with_retries(
+                lambda: self.drive.comments()
+                .create(fileId=file_id, body={"content": content}, fields="id")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
         return {"id": result["id"], "content": result.get("content", "")}
 
     def find_by_exact_title(self, title: str) -> dict | None:
@@ -437,7 +518,12 @@ class GoogleDocsProvider:
         q = f"name = '{escaped}' and mimeType = '{DOC_MIME_TYPE}' and trashed = false"
         response = _with_retries(
             lambda: self.drive.files()
-            .list(q=q, pageSize=1, fields="files(id,name,modifiedTime,mimeType)")
+            .list(
+                q=q,
+                pageSize=1,
+                orderBy="modifiedTime desc",
+                fields="files(id,name,modifiedTime,mimeType)",
+            )
             .execute()
         )
         files = response.get("files", [])

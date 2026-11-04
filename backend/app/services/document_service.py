@@ -20,6 +20,7 @@ from app.document_engine.ast import Heading
 from app.document_engine.markdown_writer import ast_to_markdown
 from app.document_engine.providers.google_docs import (
     DocNotFound,
+    ExportTooLarge,
     GoogleDocsProvider,
     RevisionConflict,
 )
@@ -125,6 +126,7 @@ def create_document(
         "document_url": DOC_URL.format(document_id),
         "revision_id": doc.get("revisionId", ""),
         "summary": f"Created document '{title}' ({_summarize_blocks(blocks)})",
+        "created": True,
     }
 
 
@@ -335,7 +337,10 @@ def restore_document(db: Session, tool_ctx, document_id: str) -> dict:
 
 def create_folder(db: Session, tool_ctx, name: str, parent_id: str | None) -> dict:
     provider = _provider(db, tool_ctx)
-    folder = provider.create_folder(name, parent_id)
+    try:
+        folder = provider.create_folder(name, parent_id)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(parent_id or "") from None
     return {
         "folder_id": folder["id"],
         "name": folder["name"],
@@ -406,7 +411,14 @@ def export_document(db: Session, tool_ctx, document_id: str, file_format: str) -
         raise tool_errors.invalid_request("format must be 'pdf'")
     provider = _provider(db, tool_ctx)
     _get_or_not_found(provider, document_id)
-    data = provider.export_file(document_id, "application/pdf")
+    try:
+        data = provider.export_file(document_id, "application/pdf")
+    except ExportTooLarge:
+        raise tool_errors.invalid_request(
+            "Export too large: exceeds Google's 10MB export limit"
+        ) from None
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
     if len(data) > EXPORT_SIZE_LIMIT:
         raise tool_errors.invalid_request(
             f"Export too large ({len(data)} bytes); limit is {EXPORT_SIZE_LIMIT} bytes"
@@ -425,7 +437,10 @@ def share_document(
 ) -> dict:
     provider = _provider(db, tool_ctx)
     _get_or_not_found(provider, document_id)
-    permission = provider.share_file(document_id, email, role, notify)
+    try:
+        permission = provider.share_file(document_id, email, role, notify)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
     return {
         "document_id": document_id,
         "permission_id": permission["id"],
@@ -446,13 +461,19 @@ def list_document_comments(
 ) -> list[dict]:
     provider = _provider(db, tool_ctx)
     _get_or_not_found(provider, document_id)
-    return provider.list_comments(document_id, limit)
+    try:
+        return provider.list_comments(document_id, limit)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
 
 
 def add_document_comment(db: Session, tool_ctx, document_id: str, content: str) -> dict:
     provider = _provider(db, tool_ctx)
     _get_or_not_found(provider, document_id)
-    comment = provider.add_comment(document_id, content)
+    try:
+        comment = provider.add_comment(document_id, content)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
     return {
         "document_id": document_id,
         "comment_id": comment["id"],

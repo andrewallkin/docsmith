@@ -68,6 +68,7 @@ class FakeProvider:
         self.folders: list[dict] = []
         self.moves: list[tuple[str, str, bool]] = []
         self.export_bytes = b""
+        self.export_too_large = False
         self.copied: list[tuple[str, str | None]] = []
         self.permissions: list[dict] = []
         self.shared: list[tuple[str, str, str, bool]] = []
@@ -149,6 +150,10 @@ class FakeProvider:
         return self.folders
 
     def move_file(self, file_id, add_parent_id, remove_current=True):
+        from app.document_engine.providers.google_docs import DocNotFound
+
+        if add_parent_id == "missing":
+            raise DocNotFound(add_parent_id)
         self.moves.append((file_id, add_parent_id, remove_current))
 
     def copy_document(self, file_id, new_title=None):
@@ -160,6 +165,10 @@ class FakeProvider:
         }
 
     def export_file(self, file_id, mime="application/pdf"):
+        from app.document_engine.providers.google_docs import ExportTooLarge
+
+        if self.export_too_large:
+            raise ExportTooLarge()
         return self.export_bytes
 
     def share_file(self, file_id, email, role, notify=True):
@@ -254,6 +263,7 @@ def test_create_document(client, active_key, fake):
     body = res.json()
     assert body["document_id"] == "new1"
     assert body["document_url"].endswith("/new1/edit")
+    assert body["created"] is True
     assert body["summary"].startswith("Created document 'Weekly report'")
     # document style + plan executed with cursor starting at 1
     assert any("updateDocumentStyle" in r for r in fake.batches[0])
@@ -497,6 +507,18 @@ def test_move_document(client, active_key, fake):
     assert fake.moves == [("doc1", "fld2", True)]
 
 
+def test_move_document_bad_folder_404(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/move",
+        json={"folder_id": "missing"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 404
+    body = res.json()
+    assert body["error"] == "doc_not_found"
+    assert "missing" in body["detail"]
+
+
 def test_copy_document(client, active_key, fake):
     res = client.post(
         "/api/v1/tools/documents/doc1/copy",
@@ -526,6 +548,18 @@ def test_export_size_cap(client, active_key, fake):
         headers={"Authorization": f"Bearer {active_key}"},
     )
     assert res.status_code == 422
+
+
+def test_export_drive_limit_422(client, active_key, fake):
+    fake.export_too_large = True
+    res = client.get(
+        "/api/v1/tools/documents/doc1/export",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"] == "invalid_request"
+    assert "10MB" in body["detail"]
 
 
 def test_share_document(client, active_key, fake):

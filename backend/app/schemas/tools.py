@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 class DocumentSearchRequest(BaseModel):
     query: str = Field(default="", max_length=200)
     full_text: str | None = Field(default=None, max_length=200)
-    folder_id: str | None = None
+    folder_id: str | None = Field(default=None, max_length=300)
     limit: int = Field(default=10, ge=1, le=50)
 
 
@@ -86,7 +86,7 @@ class ExportResponse(BaseModel):
 
 class FolderCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=300)
-    parent_id: str | None = None
+    parent_id: str | None = Field(default=None, max_length=300)
 
 
 class FolderCreateResponse(BaseModel):
@@ -110,7 +110,7 @@ class FolderDeleteRequest(BaseModel):
 
 
 class DocumentMoveRequest(BaseModel):
-    folder_id: str
+    folder_id: str = Field(max_length=300)
     remove_current: bool = True
 
 
