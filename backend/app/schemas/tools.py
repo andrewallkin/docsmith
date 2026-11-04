@@ -66,6 +66,10 @@ class DocumentDeleteRequest(BaseModel):
     confirm: bool
 
 
+class DocumentRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+
+
 class MutationResponse(BaseModel):
     document_id: str
     document_url: str

@@ -303,6 +303,30 @@ def delete_document(
     }
 
 
+def rename_document(db: Session, tool_ctx, document_id: str, title: str) -> dict:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    provider.rename_file(document_id, title)
+    return {
+        "document_id": document_id,
+        "document_url": DOC_URL.format(document_id),
+        "summary": f"Renamed document to '{title}'",
+    }
+
+
+def restore_document(db: Session, tool_ctx, document_id: str) -> dict:
+    provider = _provider(db, tool_ctx)
+    try:
+        provider.untrash_document(document_id)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
+    return {
+        "document_id": document_id,
+        "document_url": DOC_URL.format(document_id),
+        "summary": "Document restored from Google Drive trash",
+    }
+
+
 def _append_position(doc: dict) -> int:
     """Index just before the final paragraph's terminating newline."""
     content = doc.get("body", {}).get("content", [])

@@ -8,6 +8,7 @@ from app.schemas.tools import (
     DocumentDeleteRequest,
     DocumentGetOrCreateRequest,
     DocumentReadResponse,
+    DocumentRenameRequest,
     DocumentSearchRequest,
     DocumentSearchResponse,
     DocumentSummary,
@@ -163,4 +164,25 @@ def delete_document(
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
     result = document_service.delete_document(tool_ctx.db, tool_ctx, document_id, payload.confirm)
+    return MutationResponse(**result)
+
+
+@router.post("/documents/{document_id}/rename", response_model=MutationResponse)
+def rename_document(
+    document_id: str,
+    payload: DocumentRenameRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.rename_document(
+        tool_ctx.db, tool_ctx, document_id, payload.title
+    )
+    return MutationResponse(**result)
+
+
+@router.post("/documents/{document_id}/restore", response_model=MutationResponse)
+def restore_document(
+    document_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.restore_document(tool_ctx.db, tool_ctx, document_id)
     return MutationResponse(**result)

@@ -57,10 +57,12 @@ class FakeProvider:
         self.created: list[dict] = []
         self.batches: list[list[dict]] = []
         self.trashed: list[str] = []
+        self.untrashed: list[str] = []
         self.plan_calls: list[dict] = []
         self.calls: list[dict] = []
         self.existing_by_title = None
         self.create_document_calls: list[str] = []
+        self.renamed: tuple[str, str] | None = None
 
     def create_document(self, title):
         self.create_document_calls.append(title)
@@ -113,6 +115,16 @@ class FakeProvider:
         if document_id == "missing":
             raise DocNotFound()
         self.trashed.append(document_id)
+
+    def untrash_document(self, document_id):
+        from app.document_engine.providers.google_docs import DocNotFound
+
+        if document_id == "missing":
+            raise DocNotFound()
+        self.untrashed.append(document_id)
+
+    def rename_file(self, file_id, title):
+        self.renamed = (file_id, title)
 
 
 @pytest.fixture()
@@ -354,6 +366,30 @@ def test_delete_with_confirm(client, active_key, fake):
     assert res.status_code == 200
     assert fake.trashed == ["doc123"]
     assert "trash" in res.json()["summary"]
+
+
+def test_rename_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/rename",
+        json={"title": "New Name"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.renamed == ("doc123", "New Name")
+    assert res.json()["document_id"] == "doc123"
+    assert res.json()["document_url"].endswith("/doc123/edit")
+    assert "New Name" in res.json()["summary"]
+
+
+def test_restore_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc123/restore",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.untrashed == ["doc123"]
+    assert res.json()["document_id"] == "doc123"
+    assert "restored" in res.json()["summary"]
 
 
 def test_update_mode_validation(client, active_key, fake):
