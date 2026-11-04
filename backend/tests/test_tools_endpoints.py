@@ -335,7 +335,7 @@ def test_replace_section(client, active_key, fake):
     # first batch: delete the section range (heading start -> EOF)
     delete = fake.batches[0][0]["deleteContentRange"]["range"]
     assert delete["startIndex"] == 30  # Details heading start
-    assert delete["endIndex"] == 75  # next heading of same level or EOF
+    assert delete["endIndex"] == 74  # last paragraph end minus final newline
     # plan rendered at the section start
     assert fake.plan_calls[0]["start_cursor"] == 30
 
@@ -402,7 +402,7 @@ def test_regenerate_with_confirm(client, active_key, fake):
     delete = fake.batches[0][0]["deleteContentRange"]["range"]
     # deletes everything before the final element (keeps the trailing paragraph)
     assert delete["startIndex"] == 1
-    assert delete["endIndex"] == 75
+    assert delete["endIndex"] == 74
     assert fake.plan_calls[0]["start_cursor"] == 1
 
 
