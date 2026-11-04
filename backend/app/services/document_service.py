@@ -521,10 +521,12 @@ def _section_end(doc: dict, outline: list[OutlineEntry], section: OutlineEntry) 
 
 
 def _last_paragraph_end(doc: dict) -> int:
+    """End index of the last paragraph, EXCLUDING its terminating newline —
+    Google rejects delete ranges that include the final newline of the body."""
     content = doc.get("body", {}).get("content", [])
     for element in reversed(content):
         if "paragraph" in element:
-            return element["endIndex"]
+            return element["endIndex"] - 1
         if "sectionBreak" in element:
             return element["startIndex"]
     return 1
