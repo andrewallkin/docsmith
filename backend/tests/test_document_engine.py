@@ -265,3 +265,63 @@ def test_markdown_writer_round_trip():
     assert bold[0].content == "world"
     assert isinstance(reparsed.children[2], ListBlock)
     assert isinstance(reparsed.children[3], Table)
+
+
+class TestDriveHelpers:
+    def _provider(self):
+        from app.document_engine.providers.google_docs import GoogleDocsProvider
+        return GoogleDocsProvider(credentials=object())  # drive() mocked below
+
+    def test_find_by_exact_title_escapes_quote(self):
+        p = self._provider()
+        calls = {}
+
+        class FakeFiles:
+            def list(self, **kw):
+                calls["q"] = kw["q"]
+                return self
+            def execute(self):
+                return {"files": [{"id": "f1", "name": "O'Brien's Trip"}]}
+
+        monkey_drive = type("D", (), {"files": lambda self: FakeFiles()})()
+        object.__setattr__(p, "_drive", monkey_drive)
+        result = p.find_by_exact_title("O'Brien's Trip")
+        assert result["id"] == "f1"
+        assert "O\\'Brien\\'s Trip" in calls["q"]
+        assert "trashed = false" in calls["q"]
+
+    def test_search_files_folder_and_fulltext(self):
+        p = self._provider()
+        calls = {}
+
+        class FakeFiles:
+            def list(self, **kw):
+                calls["q"] = kw["q"]
+                return self
+            def execute(self):
+                return {"files": []}
+
+        object.__setattr__(p, "_drive", type("D", (), {"files": lambda self: FakeFiles()})())
+        p.search_files(full_text="kyoto", folder_id="fld1", limit=5)
+        assert "fullText contains 'kyoto'" in calls["q"]
+        assert "'fld1' in parents" in calls["q"]
+
+    def test_create_folder(self):
+        p = self._provider()
+        captured = {}
+
+        class FakeCreate:
+            def __init__(self, body):
+                captured["body"] = body
+            def execute(self):
+                return {"id": "fld9", "name": captured["body"]["name"], "parents": ["root"]}
+
+        class FakeFiles:
+            def create(self, **kw):
+                return FakeCreate(kw["body"])
+
+        object.__setattr__(p, "_drive", type("D", (), {"files": lambda self: FakeFiles()})())
+        folder = p.create_folder("Travel/Japan 2027", parent_id="fldRoot")
+        assert folder["id"] == "fld9"
+        assert captured["body"]["mimeType"] == "application/vnd.google-apps.folder"
+        assert "fldRoot" in captured["body"]["parents"]

@@ -19,6 +19,7 @@ from app.document_engine.themes import Theme
 logger = logging.getLogger(__name__)
 
 DOC_MIME_TYPE = "application/vnd.google-apps.document"
+DOC_URL = "https://docs.google.com/document/d/{}/edit"
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 3
@@ -232,9 +233,28 @@ class GoogleDocsProvider:
 
     # ---- drive helpers ----
 
-    def search_documents(self, query: str, limit: int = 10) -> list[dict]:
-        escaped = query.replace("'", "\\'")
-        q = f"name contains '{escaped}' and mimeType = '{DOC_MIME_TYPE}' and trashed = false"
+    def search_files(
+        self,
+        *,
+        name_query: str | None = None,
+        full_text: str | None = None,
+        folder_id: str | None = None,
+        trashed: bool = False,
+        mime: str = DOC_MIME_TYPE,
+        limit: int = 10,
+    ) -> list[dict]:
+        clauses = []
+        if name_query:
+            escaped = name_query.replace("'", "\\'")
+            clauses.append(f"name contains '{escaped}'")
+        if full_text:
+            escaped = full_text.replace("'", "\\'")
+            clauses.append(f"fullText contains '{escaped}'")
+        if folder_id:
+            clauses.append(f"'{folder_id}' in parents")
+        clauses.append(f"mimeType = '{mime}'")
+        clauses.append("trashed = " + ("true" if trashed else "false"))
+        q = " and ".join(clauses)
         response = _with_retries(
             lambda: self.drive.files()
             .list(q=q, pageSize=min(limit, 100), fields="files(id,name,modifiedTime,mimeType)")
@@ -244,11 +264,23 @@ class GoogleDocsProvider:
             {
                 "id": f["id"],
                 "name": f.get("name", ""),
-                "url": f"https://docs.google.com/document/d/{f['id']}/edit",
+                "url": DOC_URL.format(f["id"]),
                 "modified_time": f.get("modifiedTime", ""),
             }
             for f in response.get("files", [])
         ]
+
+    def search_documents(
+        self,
+        query: str,
+        limit: int = 10,
+        *,
+        full_text: str | None = None,
+        folder_id: str | None = None,
+    ) -> list[dict]:
+        return self.search_files(
+            name_query=query or None, full_text=full_text, folder_id=folder_id, limit=limit
+        )
 
     def list_accessible_documents(self, limit: int = 20) -> list[dict]:
         response = _with_retries(
@@ -276,6 +308,148 @@ class GoogleDocsProvider:
             .update(fileId=document_id, body={"trashed": True}, fields="id")
             .execute()
         )
+
+    def rename_file(self, file_id: str, title: str) -> None:
+        _with_retries(
+            lambda: self.drive.files()
+            .update(fileId=file_id, body={"name": title}, fields="id")
+            .execute()
+        )
+
+    def move_file(self, file_id: str, add_parent_id: str, remove_current: bool = True) -> None:
+        current = _with_retries(
+            lambda: self.drive.files().get(fileId=file_id, fields="parents").execute()
+        )
+        params: dict = {"fileId": file_id, "addParents": add_parent_id, "fields": "id"}
+        if remove_current and current.get("parents"):
+            params["removeParents"] = ",".join(current["parents"])
+        _with_retries(lambda: self.drive.files().update(**params).execute())
+
+    def copy_document(self, file_id: str, new_title: str | None = None) -> dict:
+        body = {"name": new_title} if new_title else {}
+        result = _with_retries(
+            lambda: self.drive.files().copy(fileId=file_id, body=body).execute()
+        )
+        return {
+            "id": result["id"],
+            "name": result.get("name", ""),
+            "url": DOC_URL.format(result["id"]),
+        }
+
+    def export_file(self, file_id: str, mime: str = "application/pdf") -> bytes:
+        return _with_retries(
+            lambda: self.drive.files().export(fileId=file_id, mimeType=mime).execute()
+        )
+
+    def untrash_document(self, file_id: str) -> None:
+        _with_retries(
+            lambda: self.drive.files()
+            .update(fileId=file_id, body={"trashed": False}, fields="id")
+            .execute()
+        )
+
+    def create_folder(self, name: str, parent_id: str | None = None) -> dict:
+        body: dict = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
+        if parent_id:
+            body["parents"] = [parent_id]
+        result = _with_retries(lambda: self.drive.files().create(body=body).execute())
+        return {
+            "id": result["id"],
+            "name": result.get("name", ""),
+            "parents": result.get("parents", []),
+        }
+
+    def list_folders(self, limit: int = 100) -> list[dict]:
+        response = _with_retries(
+            lambda: self.drive.files()
+            .list(
+                q="mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                pageSize=min(limit, 100),
+                fields="files(id,name,parents)",
+            )
+            .execute()
+        )
+        return [
+            {"id": f["id"], "name": f.get("name", ""), "parents": f.get("parents", [])}
+            for f in response.get("files", [])
+        ]
+
+    def share_file(self, file_id: str, email: str, role: str, notify: bool = True) -> dict:
+        result = _with_retries(
+            lambda: self.drive.permissions()
+            .create(
+                fileId=file_id,
+                body={"type": "user", "role": role, "emailAddress": email},
+                sendNotificationEmail=notify,
+                fields="id",
+            )
+            .execute()
+        )
+        return {"id": result["id"], "email": email, "role": role}
+
+    def list_permissions(self, file_id: str) -> list[dict]:
+        response = _with_retries(
+            lambda: self.drive.permissions()
+            .list(fileId=file_id, fields="permissions(id,emailAddress,role,type)")
+            .execute()
+        )
+        return [
+            {
+                "id": p["id"],
+                "email": p.get("emailAddress", ""),
+                "role": p.get("role", ""),
+                "type": p.get("type", ""),
+            }
+            for p in response.get("permissions", [])
+        ]
+
+    def list_comments(self, file_id: str, limit: int = 50) -> list[dict]:
+        response = _with_retries(
+            lambda: self.drive.comments()
+            .list(
+                fileId=file_id,
+                pageSize=min(limit, 100),
+                fields="comments(id,author(displayName),content,createdTime,resolved)",
+            )
+            .execute()
+        )
+        return [
+            {
+                "id": c["id"],
+                "author": (c.get("author") or {}).get("displayName", ""),
+                "content": c.get("content", ""),
+                "created_time": c.get("createdTime", ""),
+                "resolved": c.get("resolved", False),
+            }
+            for c in response.get("comments", [])
+        ]
+
+    def add_comment(self, file_id: str, content: str) -> dict:
+        result = _with_retries(
+            lambda: self.drive.comments()
+            .create(fileId=file_id, body={"content": content})
+            .execute()
+        )
+        return {"id": result["id"], "content": result.get("content", "")}
+
+    def find_by_exact_title(self, title: str) -> dict | None:
+        escaped = title.replace("'", "\\'")
+        q = f"name = '{escaped}' and mimeType = '{DOC_MIME_TYPE}' and trashed = false"
+        response = _with_retries(
+            lambda: self.drive.files()
+            .list(q=q, pageSize=1, fields="files(id,name,modifiedTime,mimeType)")
+            .execute()
+        )
+        files = response.get("files", [])
+        if not files:
+            return None
+        f = files[0]
+        return {
+            "id": f["id"],
+            "name": f.get("name", ""),
+            "url": DOC_URL.format(f["id"]),
+            "modified_time": f.get("modifiedTime", ""),
+        }
 
 
 def _rgb_from_hex(hex_colour: str) -> dict:
