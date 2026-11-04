@@ -1,0 +1,39 @@
+[project]
+name = "docsmith-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic",
+    "bcrypt>=4.0.1,<4.1",
+    "cryptography",
+    "email-validator",
+    "fastapi",
+    "google-api-python-client",
+    "google-auth",
+    "httpx",
+    "markdown-it-py",
+    "passlib[bcrypt]",
+    "psycopg2-binary",
+    "pydantic-settings",
+    "python-jose[cryptography]",
+    "sqlalchemy",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+# B008: function-call defaults (Depends(...)) are the FastAPI idiom
+ignore = ["B008"]

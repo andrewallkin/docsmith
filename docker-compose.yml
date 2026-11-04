@@ -1,0 +1,28 @@
+services:
+  backend:
+    image: andrewallkin/docsmith:${DOCKER_IMAGE_BACKEND:-backend-main-latest}
+    env_file: .env
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [default, postgres-net]
+    restart: always
+
+  frontend:
+    image: andrewallkin/docsmith:${DOCKER_IMAGE_FRONTEND:-frontend-main-latest}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [default]
+    restart: always
+
+networks:
+  postgres-net:
+    external: true
