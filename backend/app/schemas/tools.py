@@ -4,7 +4,9 @@ from pydantic import BaseModel, Field
 
 
 class DocumentSearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=200)
+    query: str = Field(default="", max_length=200)
+    full_text: str | None = Field(default=None, max_length=200)
+    folder_id: str | None = None
     limit: int = Field(default=10, ge=1, le=50)
 
 

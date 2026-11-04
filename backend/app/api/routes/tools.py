@@ -54,7 +54,14 @@ def search_documents(
     payload: DocumentSearchRequest,
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
-    results = document_service.search_documents(tool_ctx.db, tool_ctx, payload.query, payload.limit)
+    results = document_service.search_documents(
+        tool_ctx.db,
+        tool_ctx,
+        payload.query,
+        payload.limit,
+        full_text=payload.full_text,
+        folder_id=payload.folder_id,
+    )
     return DocumentSearchResponse(
         documents=[DocumentSummary(**doc) for doc in results]
     )

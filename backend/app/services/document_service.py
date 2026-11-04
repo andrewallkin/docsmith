@@ -68,10 +68,15 @@ def _summarize_blocks(blocks: list) -> str:
 
 
 def search_documents(
-    db: Session, tool_ctx, query: str, limit: int = 10
+    db: Session,
+    tool_ctx,
+    query: str,
+    limit: int = 10,
+    full_text: str | None = None,
+    folder_id: str | None = None,
 ) -> list[dict]:
     provider = _provider(db, tool_ctx)
-    return provider.search_documents(query, limit)
+    return provider.search_documents(query, limit, full_text=full_text, folder_id=folder_id)
 
 
 def read_document(db: Session, tool_ctx, document_id: str) -> dict:

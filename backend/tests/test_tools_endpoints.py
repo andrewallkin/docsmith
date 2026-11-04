@@ -58,6 +58,7 @@ class FakeProvider:
         self.batches: list[list[dict]] = []
         self.trashed: list[str] = []
         self.plan_calls: list[dict] = []
+        self.calls: list[dict] = []
 
     def create_document(self, title):
         return {"documentId": "new1", "title": title, "revisionId": self.revision}
@@ -87,7 +88,10 @@ class FakeProvider:
         self.revision = "rev-after-write"
         return start_cursor, self.revision
 
-    def search_documents(self, query, limit=10):
+    def search_documents(self, query, limit=10, full_text=None, folder_id=None):
+        self.calls.append(
+            {"query": query, "limit": limit, "full_text": full_text, "folder_id": folder_id}
+        )
         return [
             {
                 "id": "doc123",
@@ -123,6 +127,26 @@ def test_search_endpoint(client, active_key, fake):
     assert len(docs) == 1
     assert docs[0]["id"] == "doc123"
     assert docs[0]["url"].endswith("/doc123/edit")
+
+
+def test_search_empty_query_lists_all(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/search",
+        json={"query": ""},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+
+
+def test_search_full_text(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/search",
+        json={"query": "", "full_text": "kyoto hotel", "folder_id": "fld1"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.calls[-1]["full_text"] == "kyoto hotel"
+    assert fake.calls[-1]["folder_id"] == "fld1"
 
 
 def test_read_document(client, active_key, fake):

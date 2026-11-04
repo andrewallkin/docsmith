@@ -99,7 +99,7 @@ def test_key_last_used_at_updates(client, active_key, db, monkeypatch):
         def __init__(self, credentials):
             pass
 
-        def search_documents(self, query, limit=10):
+        def search_documents(self, query, limit=10, full_text=None, folder_id=None):
             return []
 
     from app.services import document_service
@@ -154,7 +154,7 @@ def test_user_isolation_between_keys(client, db, monkeypatch):
         def __init__(self, credentials):
             seen["provider_built"] = True
 
-        def search_documents(self, query, limit=10):
+        def search_documents(self, query, limit=10, full_text=None, folder_id=None):
             return []
 
     def fake_provider_factory(db_session, ctx):
