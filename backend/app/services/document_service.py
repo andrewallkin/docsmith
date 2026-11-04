@@ -313,8 +313,11 @@ def delete_document(
 
 def rename_document(db: Session, tool_ctx, document_id: str, title: str) -> dict:
     provider = _provider(db, tool_ctx)
-    _get_or_not_found(provider, document_id)
-    provider.rename_file(document_id, title)
+    # No Docs-API pre-check: folders can be renamed too but are not documents.
+    try:
+        provider.rename_file(document_id, title)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(document_id) from None
     return {
         "document_id": document_id,
         "document_url": DOC_URL.format(document_id),
@@ -380,11 +383,13 @@ def move_document(
     db: Session, tool_ctx, document_id: str, folder_id: str, remove_current: bool = True
 ) -> dict:
     provider = _provider(db, tool_ctx)
-    _get_or_not_found(provider, document_id)
+    # No Docs-API pre-check: folders are valid move targets but not documents.
     try:
         provider.move_file(document_id, folder_id, remove_current)
-    except DocNotFound:
-        raise tool_errors.doc_not_found(folder_id) from None
+    except DocNotFound as exc:
+        if folder_id in str(exc):
+            raise tool_errors.doc_not_found(folder_id) from None
+        raise tool_errors.doc_not_found(document_id) from None
     return {
         "document_id": document_id,
         "document_url": DOC_URL.format(document_id),

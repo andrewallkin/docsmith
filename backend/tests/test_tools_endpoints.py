@@ -135,6 +135,10 @@ class FakeProvider:
         self.untrashed.append(document_id)
 
     def rename_file(self, file_id, title):
+        from app.document_engine.providers.google_docs import DocNotFound
+
+        if file_id == "missing":
+            raise DocNotFound(file_id)
         self.renamed = (file_id, title)
 
     def create_folder(self, name, parent_id=None):
@@ -154,6 +158,8 @@ class FakeProvider:
 
         if add_parent_id == "missing":
             raise DocNotFound(add_parent_id)
+        if file_id == "missing":
+            raise DocNotFound(file_id)
         self.moves.append((file_id, add_parent_id, remove_current))
 
     def copy_document(self, file_id, new_title=None):
