@@ -427,7 +427,7 @@ class GoogleDocsProvider:
     def add_comment(self, file_id: str, content: str) -> dict:
         result = _with_retries(
             lambda: self.drive.comments()
-            .create(fileId=file_id, body={"content": content})
+            .create(fileId=file_id, body={"content": content}, fields="id")
             .execute()
         )
         return {"id": result["id"], "content": result.get("content", "")}
