@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
 
 # ---- documents ----
 
@@ -123,3 +125,31 @@ class MutationResponse(BaseModel):
 class MutationPreviewResponse(BaseModel):
     detail: str
     preview: dict
+
+
+# ---- sharing ----
+
+
+class ShareRequest(BaseModel):
+    email: EmailStr
+    role: Literal["reader", "writer", "commenter"]
+    notify: bool = True
+
+
+class ShareResponse(BaseModel):
+    document_id: str
+    permission_id: str
+    email: str
+    role: str
+    summary: str
+
+
+class PermissionOut(BaseModel):
+    id: str
+    email: str
+    role: str
+    type: str
+
+
+class ShareListResponse(BaseModel):
+    permissions: list[PermissionOut]

@@ -420,6 +420,27 @@ def export_document(db: Session, tool_ctx, document_id: str, file_format: str) -
     }
 
 
+def share_document(
+    db: Session, tool_ctx, document_id: str, email: str, role: str, notify: bool = True
+) -> dict:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    permission = provider.share_file(document_id, email, role, notify)
+    return {
+        "document_id": document_id,
+        "permission_id": permission["id"],
+        "email": email,
+        "role": role,
+        "summary": f"Shared document with {email} as {role}",
+    }
+
+
+def list_permissions(db: Session, tool_ctx, document_id: str) -> list[dict]:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    return provider.list_permissions(document_id)
+
+
 def _append_position(doc: dict) -> int:
     """Index just before the final paragraph's terminating newline."""
     content = doc.get("body", {}).get("content", [])

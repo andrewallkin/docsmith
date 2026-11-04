@@ -69,6 +69,8 @@ class FakeProvider:
         self.moves: list[tuple[str, str, bool]] = []
         self.export_bytes = b""
         self.copied: list[tuple[str, str | None]] = []
+        self.permissions: list[dict] = []
+        self.shared: list[tuple[str, str, str, bool]] = []
 
     def create_document(self, title):
         self.create_document_calls.append(title)
@@ -157,6 +159,13 @@ class FakeProvider:
 
     def export_file(self, file_id, mime="application/pdf"):
         return self.export_bytes
+
+    def share_file(self, file_id, email, role, notify=True):
+        self.shared.append((file_id, email, role, notify))
+        return {"id": "perm1", "email": email, "role": role}
+
+    def list_permissions(self, file_id):
+        return self.permissions
 
 
 @pytest.fixture()
@@ -508,6 +517,35 @@ def test_export_size_cap(client, active_key, fake):
         headers={"Authorization": f"Bearer {active_key}"},
     )
     assert res.status_code == 422
+
+
+def test_share_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc1/share",
+        json={"email": "partner@example.com", "role": "writer"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["permission_id"] == "perm1"
+    assert fake.shared == [("doc1", "partner@example.com", "writer", True)]
+
+
+def test_share_invalid_role(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc1/share",
+        json={"email": "p@example.com", "role": "owner"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+
+
+def test_list_permissions(client, active_key, fake):
+    fake.permissions = [{"id": "perm1", "email": "a@b.c", "role": "writer", "type": "user"}]
+    res = client.get(
+        "/api/v1/tools/documents/doc1/share", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 200
+    assert res.json()["permissions"][0]["email"] == "a@b.c"
 
 
 def test_key_without_google_connection_409_on_all_tools(client, user_and_headers):

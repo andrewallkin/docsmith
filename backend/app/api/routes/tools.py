@@ -22,6 +22,10 @@ from app.schemas.tools import (
     FolderListResponse,
     FolderOut,
     MutationResponse,
+    PermissionOut,
+    ShareListResponse,
+    ShareRequest,
+    ShareResponse,
 )
 from app.services import document_service
 
@@ -43,6 +47,8 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 | POST | /api/v1/tools/documents/{id}/rename | Rename a doc |
 | POST | /api/v1/tools/documents/{id}/move | Move doc into a folder |
 | POST | /api/v1/tools/documents/{id}/copy | Copy a doc (optional new title) |
+| POST | /api/v1/tools/documents/{id}/share | Share doc with an email (reader/writer/commenter) |
+| GET | /api/v1/tools/documents/{id}/share | List sharing permissions on a doc |
 | GET | /api/v1/tools/documents/{id}/export | Export doc as PDF (base64, query format=pdf) |
 | POST | /api/v1/tools/folders | Create a Drive folder (optional parent_id) |
 | GET | /api/v1/tools/folders | List accessible Drive folders |
@@ -263,3 +269,24 @@ def export_document(
 ):
     result = document_service.export_document(tool_ctx.db, tool_ctx, document_id, format)
     return ExportResponse(**result)
+
+
+@router.post("/documents/{document_id}/share", response_model=ShareResponse)
+def share_document(
+    document_id: str,
+    payload: ShareRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.share_document(
+        tool_ctx.db, tool_ctx, document_id, payload.email, payload.role, payload.notify
+    )
+    return ShareResponse(**result)
+
+
+@router.get("/documents/{document_id}/share", response_model=ShareListResponse)
+def list_permissions(
+    document_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    permissions = document_service.list_permissions(tool_ctx.db, tool_ctx, document_id)
+    return ShareListResponse(permissions=[PermissionOut(**p) for p in permissions])
