@@ -63,6 +63,8 @@ class FakeProvider:
         self.existing_by_title = None
         self.create_document_calls: list[str] = []
         self.renamed: tuple[str, str] | None = None
+        self.folders: list[dict] = []
+        self.moves: list[tuple[str, str, bool]] = []
 
     def create_document(self, title):
         self.create_document_calls.append(title)
@@ -125,6 +127,21 @@ class FakeProvider:
 
     def rename_file(self, file_id, title):
         self.renamed = (file_id, title)
+
+    def create_folder(self, name, parent_id=None):
+        folder = {
+            "id": f"fld{len(self.folders) + 1}",
+            "name": name,
+            "parents": [parent_id] if parent_id else [],
+        }
+        self.folders.append(folder)
+        return folder
+
+    def list_folders(self, limit=100):
+        return self.folders
+
+    def move_file(self, file_id, add_parent_id, remove_current=True):
+        self.moves.append((file_id, add_parent_id, remove_current))
 
 
 @pytest.fixture()
@@ -400,6 +417,51 @@ def test_update_mode_validation(client, active_key, fake):
     )
     assert res.status_code == 422
     assert res.json()["error"] == "invalid_request"
+
+
+def test_create_folder(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/folders",
+        json={"name": "Travel/Japan 2027", "parent_id": "fldRoot"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 201
+    assert res.json()["folder_id"] == fake.folders[-1]["id"]
+
+
+def test_list_folders(client, active_key, fake):
+    fake.folders = [{"id": "f1", "name": "Research", "parents": ["fldRoot"]}]
+    res = client.get("/api/v1/tools/folders", headers={"Authorization": f"Bearer {active_key}"})
+    assert res.status_code == 200
+    assert res.json()["folders"][0]["name"] == "Research"
+
+
+def test_delete_folder_requires_confirm(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/folders/fld1/delete",
+        json={},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert res.json()["error"] == "confirmation_required"
+    assert fake.trashed == []
+    res = client.post(
+        "/api/v1/tools/folders/fld1/delete",
+        json={"confirm": True},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.trashed == ["fld1"]
+
+
+def test_move_document(client, active_key, fake):
+    res = client.post(
+        "/api/v1/tools/documents/doc1/move",
+        json={"folder_id": "fld2"},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.moves == [("doc1", "fld2", True)]
 
 
 def test_key_without_google_connection_409_on_all_tools(client, user_and_headers):

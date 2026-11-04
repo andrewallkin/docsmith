@@ -1,5 +1,7 @@
 """Document orchestration for the agent tool API: search / read / create /
-append / replace_section / regenerate / delete.
+append / replace_section / regenerate / delete / rename / restore, plus
+Drive folder management (create / list / delete) and moving documents
+between folders.
 
 Every mutation accepts an optional required_revision_id; when supplied, the
 document's current revision is checked first (read-back) and the write is
@@ -25,6 +27,7 @@ from app.document_engine.themes import get_theme
 from app.services import google_oauth_service
 
 DOC_URL = "https://docs.google.com/document/d/{}/edit"
+FOLDER_URL = "https://drive.google.com/drive/folders/{}"
 
 
 def _provider(db: Session, tool_ctx) -> GoogleDocsProvider:
@@ -324,6 +327,60 @@ def restore_document(db: Session, tool_ctx, document_id: str) -> dict:
         "document_id": document_id,
         "document_url": DOC_URL.format(document_id),
         "summary": "Document restored from Google Drive trash",
+    }
+
+
+def create_folder(db: Session, tool_ctx, name: str, parent_id: str | None) -> dict:
+    provider = _provider(db, tool_ctx)
+    folder = provider.create_folder(name, parent_id)
+    return {
+        "folder_id": folder["id"],
+        "name": folder["name"],
+        "url": FOLDER_URL.format(folder["id"]),
+    }
+
+
+def list_folders(db: Session, tool_ctx, limit: int = 100) -> list[dict]:
+    return _provider(db, tool_ctx).list_folders(limit)
+
+
+def delete_folder(db: Session, tool_ctx, folder_id: str, confirm: bool) -> dict:
+    if not confirm:
+        raise tool_errors.confirmation_required(
+            {
+                "operation": "delete_folder",
+                "folder_id": folder_id,
+                "effect": (
+                    "Moves the folder to Google Drive trash. Files inside are NOT "
+                    "trashed (Drive keeps them in My Drive)."
+                ),
+            }
+        )
+    provider = _provider(db, tool_ctx)
+    try:
+        provider.trash_document(folder_id)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(folder_id) from None
+    return {
+        "document_id": folder_id,
+        "document_url": FOLDER_URL.format(folder_id),
+        "summary": "Folder moved to Google Drive trash",
+    }
+
+
+def move_document(
+    db: Session, tool_ctx, document_id: str, folder_id: str, remove_current: bool = True
+) -> dict:
+    provider = _provider(db, tool_ctx)
+    _get_or_not_found(provider, document_id)
+    try:
+        provider.move_file(document_id, folder_id, remove_current)
+    except DocNotFound:
+        raise tool_errors.doc_not_found(folder_id) from None
+    return {
+        "document_id": document_id,
+        "document_url": DOC_URL.format(document_id),
+        "summary": f"Moved document into folder {folder_id}",
     }
 
 

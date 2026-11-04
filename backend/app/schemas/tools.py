@@ -70,6 +70,36 @@ class DocumentRenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
 
 
+class FolderCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    parent_id: str | None = None
+
+
+class FolderCreateResponse(BaseModel):
+    folder_id: str
+    name: str
+    url: str
+
+
+class FolderOut(BaseModel):
+    id: str
+    name: str
+    parents: list[str] = []
+
+
+class FolderListResponse(BaseModel):
+    folders: list[FolderOut]
+
+
+class FolderDeleteRequest(BaseModel):
+    confirm: bool = False
+
+
+class DocumentMoveRequest(BaseModel):
+    folder_id: str
+    remove_current: bool = True
+
+
 class MutationResponse(BaseModel):
     document_id: str
     document_url: str

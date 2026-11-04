@@ -7,12 +7,18 @@ from app.schemas.tools import (
     DocumentCreateRequest,
     DocumentDeleteRequest,
     DocumentGetOrCreateRequest,
+    DocumentMoveRequest,
     DocumentReadResponse,
     DocumentRenameRequest,
     DocumentSearchRequest,
     DocumentSearchResponse,
     DocumentSummary,
     DocumentUpdateRequest,
+    FolderCreateRequest,
+    FolderCreateResponse,
+    FolderDeleteRequest,
+    FolderListResponse,
+    FolderOut,
     MutationResponse,
 )
 from app.services import document_service
@@ -31,6 +37,12 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 | PATCH | /api/v1/tools/documents/{id} | Update: replace_section or regenerate |
 | POST | /api/v1/tools/documents/{id}/append | Append markdown at end of doc |
 | POST | /api/v1/tools/documents/{id}/delete | Move doc to trash (requires confirm: true) |
+| POST | /api/v1/tools/documents/{id}/restore | Restore doc from trash |
+| POST | /api/v1/tools/documents/{id}/rename | Rename a doc |
+| POST | /api/v1/tools/documents/{id}/move | Move doc into a folder |
+| POST | /api/v1/tools/folders | Create a Drive folder (optional parent_id) |
+| GET | /api/v1/tools/folders | List accessible Drive folders |
+| POST | /api/v1/tools/folders/{id}/delete | Move folder to trash (requires confirm: true) |
 
 Markdown supports: H1-H3 headings, bold/italic, links, ordered and unordered
 lists, tables, `---` page breaks. Optional theme: `professional` (default).
@@ -185,4 +197,43 @@ def restore_document(
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
     result = document_service.restore_document(tool_ctx.db, tool_ctx, document_id)
+    return MutationResponse(**result)
+
+
+@router.post("/folders", response_model=FolderCreateResponse, status_code=201)
+def create_folder(
+    payload: FolderCreateRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.create_folder(tool_ctx.db, tool_ctx, payload.name, payload.parent_id)
+    return FolderCreateResponse(**result)
+
+
+@router.get("/folders", response_model=FolderListResponse)
+def list_folders(
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    folders = document_service.list_folders(tool_ctx.db, tool_ctx)
+    return FolderListResponse(folders=[FolderOut(**folder) for folder in folders])
+
+
+@router.post("/folders/{folder_id}/delete", response_model=MutationResponse)
+def delete_folder(
+    folder_id: str,
+    payload: FolderDeleteRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.delete_folder(tool_ctx.db, tool_ctx, folder_id, payload.confirm)
+    return MutationResponse(**result)
+
+
+@router.post("/documents/{document_id}/move", response_model=MutationResponse)
+def move_document(
+    document_id: str,
+    payload: DocumentMoveRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = document_service.move_document(
+        tool_ctx.db, tool_ctx, document_id, payload.folder_id, payload.remove_current
+    )
     return MutationResponse(**result)
