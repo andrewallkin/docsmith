@@ -2,12 +2,25 @@ import { useEffect, useState } from 'react'
 import api from '../client'
 
 const ENDPOINTS = [
-  { method: 'POST', path: '/api/v1/tools/documents/search', purpose: 'Search docs by title' },
+  { method: 'POST', path: '/api/v1/tools/documents/search', purpose: 'Search / list docs' },
   { method: 'GET', path: '/api/v1/tools/documents/{id}', purpose: 'Read a doc (markdown)' },
   { method: 'POST', path: '/api/v1/tools/documents', purpose: 'Create a doc from markdown' },
+  { method: 'POST', path: '/api/v1/tools/documents/get-or-create', purpose: 'Create or return existing by title' },
   { method: 'PATCH', path: '/api/v1/tools/documents/{id}', purpose: 'Replace section / regenerate' },
   { method: 'POST', path: '/api/v1/tools/documents/{id}/append', purpose: 'Append markdown' },
   { method: 'POST', path: '/api/v1/tools/documents/{id}/delete', purpose: 'Move to trash (confirm)' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/restore', purpose: 'Restore from trash' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/rename', purpose: 'Rename a doc' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/move', purpose: 'Move doc into a folder' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/copy', purpose: 'Copy a doc' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/share', purpose: 'Share with an email' },
+  { method: 'GET', path: '/api/v1/tools/documents/{id}/share', purpose: 'List sharing permissions' },
+  { method: 'GET', path: '/api/v1/tools/documents/{id}/comments', purpose: 'List comments' },
+  { method: 'POST', path: '/api/v1/tools/documents/{id}/comments', purpose: 'Add a comment' },
+  { method: 'GET', path: '/api/v1/tools/documents/{id}/export', purpose: 'Export as PDF (base64)' },
+  { method: 'POST', path: '/api/v1/tools/folders', purpose: 'Create a Drive folder' },
+  { method: 'GET', path: '/api/v1/tools/folders', purpose: 'List Drive folders' },
+  { method: 'POST', path: '/api/v1/tools/folders/{id}/delete', purpose: 'Move folder to trash (confirm)' },
 ]
 
 export default function IntegrationCard() {
@@ -36,6 +49,11 @@ export default function IntegrationCard() {
       <code className="mb-4 block overflow-x-auto rounded bg-slate-100 px-3 py-2 text-xs">
         {base}/api/v1
       </code>
+      <p className="mb-4 text-sm text-slate-500">
+        The bot can fetch <code className="rounded bg-slate-100 px-1 font-mono text-xs">GET /api/v1/tools/info</code>{' '}
+        (quick start) and <code className="rounded bg-slate-100 px-1 font-mono text-xs">GET /api/v1/tools/docs</code>{' '}
+        (full reference) without a key.
+      </p>
       <p className="mb-2 text-sm text-slate-500">Endpoints:</p>
       <ul className="mb-4 space-y-1 text-sm text-slate-600">
         {ENDPOINTS.map((ep) => (

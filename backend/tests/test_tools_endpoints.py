@@ -664,3 +664,18 @@ def test_key_without_google_connection_409_on_all_tools(client, user_and_headers
         ).status_code
         == 409
     )
+
+
+def test_tool_docs_public(client):
+    resp = client.get("/api/v1/tools/docs")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/markdown")
+    assert "tools/documents/search" in resp.text
+
+
+def test_tool_info_public(client):
+    resp = client.get("/api/v1/tools/info")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert "ds_live_" in resp.text
+    assert "/api/v1/tools/docs" in resp.text

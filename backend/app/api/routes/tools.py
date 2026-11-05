@@ -83,6 +83,36 @@ def tool_docs():
     return PlainTextResponse(TOOL_DOCS.replace("{base}", base), media_type="text/markdown")
 
 
+TOOL_INFO = """Docsmith tool API — quick start for bots.
+
+Auth: every request needs `Authorization: Bearer ds_live_...` (create a key
+in the Docsmith dashboard). All paths are relative to `{base}/api/v1`.
+
+Full endpoint reference: GET {base}/api/v1/tools/docs (no auth, markdown).
+
+Core operations:
+- POST tools/documents/search — search/list docs
+- GET tools/documents/{{id}} — read a doc as markdown
+- POST tools/documents — create a doc from markdown
+- POST tools/documents/get-or-create — create or return existing by title
+- PATCH tools/documents/{{id}} — replace a section or regenerate
+- POST tools/documents/{{id}}/append — append markdown
+- POST tools/documents/{{id}}/rename | /move | /copy | /share — organize
+- GET/POST tools/documents/{{id}}/comments — read/add comments
+- POST tools/documents/{{id}}/export?format=pdf — export as base64 PDF
+- POST/GET tools/folders — create/list Drive folders
+- Destructive ops (delete, regenerate, folder delete) need `confirm: true`.
+"""
+
+
+@router.get("/info", response_class=PlainTextResponse)
+def tool_info():
+    from app.config import get_settings
+
+    base = get_settings().frontend_url
+    return PlainTextResponse(TOOL_INFO.replace("{base}", base), media_type="text/plain")
+
+
 @router.post("/documents/search", response_model=DocumentSearchResponse)
 def search_documents(
     payload: DocumentSearchRequest,
