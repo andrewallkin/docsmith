@@ -7,9 +7,13 @@ from app.document_engine.a1 import quote_sheet_name
 from app.document_engine.providers.google_drive_base import (
     MAX_ATTEMPTS,
     RETRYABLE_STATUS,
+    DocNotFound,
     DriveFileOps,
     _with_retries,
 )
+
+SPREADSHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/{}/edit"
 
 
 class SpreadsheetNotFound(Exception):
@@ -193,3 +197,33 @@ class GoogleSheetsProvider(DriveFileOps):
         result = self.batch_update(spreadsheet_id, [{"findReplace": request}])
         replies = result.get("replies", [])
         return replies[0].get("findReplace", {}).get("occurrencesChanged", 0) if replies else 0
+
+    def search_spreadsheets(
+        self, query: str = "", limit: int = 10, folder_id: str | None = None
+    ) -> list[dict]:
+        results = self.search_files(
+            name_query=query, folder_id=folder_id, mime=SPREADSHEET_MIME_TYPE, limit=limit
+        )
+        return [{**result, "url": SPREADSHEET_URL.format(result["id"])} for result in results]
+
+    def copy_spreadsheet(self, file_id: str, new_title: str | None = None) -> dict:
+        result = self.copy_document(file_id, new_title)
+        return {**result, "url": SPREADSHEET_URL.format(result["id"])}
+
+    def get_file_metadata(self, file_id: str) -> dict:
+        try:
+            result = _with_retries(
+                lambda: self.drive.files()
+                .get(fileId=file_id, fields="id,name,modifiedTime")
+                .execute()
+            )
+        except HttpError as exc:
+            status = exc.resp.status if exc.resp is not None else None
+            if status == 404:
+                raise DocNotFound(str(exc)) from exc
+            raise
+        return {
+            "id": result["id"],
+            "name": result.get("name", ""),
+            "modified_time": result.get("modifiedTime", ""),
+        }

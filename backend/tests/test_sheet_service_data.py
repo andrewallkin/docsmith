@@ -7,8 +7,11 @@ import pytest
 
 from app.core.tool_errors import ToolApiError
 from app.document_engine.a1 import InvalidRangeError, parse_a1, quote_sheet_name
+from app.document_engine.providers.google_drive_base import DocNotFound
 from app.document_engine.providers.google_sheets import SheetApiError, SpreadsheetNotFound
 from app.services import sheet_service as sheets
+
+SHEET_URL = "https://docs.google.com/spreadsheets/d/sheet1/edit"
 
 
 class FakeSheetsProvider:
@@ -37,6 +40,9 @@ class FakeSheetsProvider:
         }
         self.data = {}
         self.calls = []
+        self.file_name = "Test spreadsheet"
+        self.modified_time = "2026-11-01T00:00:00Z"
+        self.trashed = False
 
     def get_spreadsheet(self, spreadsheet_id):
         self.calls.append(("get_spreadsheet", spreadsheet_id))
@@ -132,7 +138,89 @@ class FakeSheetsProvider:
 
     def create_spreadsheet(self, title, sheet_titles):
         self.calls.append(("create_spreadsheet", title, sheet_titles))
-        return self.meta
+        names = list(sheet_titles) or ["Sheet1"]
+        return {
+            "spreadsheetId": "sheet1",
+            "spreadsheetUrl": SHEET_URL,
+            "properties": {"title": title},
+            "sheets": [
+                {
+                    "properties": {
+                        "title": name,
+                        "sheetId": index,
+                        "gridProperties": {"rowCount": 1000, "columnCount": 26},
+                    }
+                }
+                for index, name in enumerate(names)
+            ],
+        }
+
+    # ---- Drive file-level operations (Task 6) ----
+
+    def _file_or_404(self, file_id):
+        if file_id != self.meta["spreadsheetId"]:
+            raise DocNotFound(f"File not found: {file_id}")
+
+    def get_file_metadata(self, file_id):
+        self.calls.append(("get_file_metadata", file_id))
+        self._file_or_404(file_id)
+        return {"id": "sheet1", "name": self.file_name, "modified_time": self.modified_time}
+
+    def search_spreadsheets(self, query, limit, folder_id=None):
+        self.calls.append(("search_spreadsheets", query, limit, folder_id))
+        return [
+            {
+                "id": "sheet1",
+                "name": self.file_name,
+                "url": SHEET_URL,
+                "modified_time": self.modified_time,
+            }
+        ]
+
+    def rename_file(self, file_id, title):
+        self.calls.append(("rename_file", file_id, title))
+        self._file_or_404(file_id)
+        self.file_name = title
+
+    def trash_document(self, file_id):
+        self.calls.append(("trash_document", file_id))
+        self._file_or_404(file_id)
+        self.trashed = True
+
+    def untrash_document(self, file_id):
+        self.calls.append(("untrash_document", file_id))
+        self._file_or_404(file_id)
+        self.trashed = False
+
+    def move_file(self, file_id, add_parent_id, remove_current=True):
+        self.calls.append(("move_file", file_id, add_parent_id, remove_current))
+        self._file_or_404(file_id)
+        if add_parent_id != "folder1":
+            raise DocNotFound(f"Folder not found: {add_parent_id}")
+
+    def copy_spreadsheet(self, file_id, new_title=None):
+        self.calls.append(("copy_spreadsheet", file_id, new_title))
+        self._file_or_404(file_id)
+        return {
+            "id": "sheet1-copy",
+            "name": new_title or "Test spreadsheet",
+            "url": "https://docs.google.com/spreadsheets/d/sheet1-copy/edit",
+        }
+
+    def share_file(self, file_id, email, role, notify=True):
+        self.calls.append(("share_file", file_id, email, role, notify))
+        self._file_or_404(file_id)
+        return {"id": "perm-123", "email": email, "role": role}
+
+    def list_permissions(self, file_id):
+        self.calls.append(("list_permissions", file_id))
+        self._file_or_404(file_id)
+        return [{"id": "perm-123", "email": "owner@example.com", "role": "owner", "type": "user"}]
+
+    def export_file(self, file_id, mime):
+        self.calls.append(("export_file", file_id, mime))
+        self._file_or_404(file_id)
+        return b"%PDF-1.4 fake export"
 
 
 @pytest.fixture

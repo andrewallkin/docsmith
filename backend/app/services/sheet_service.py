@@ -1,10 +1,12 @@
 """Spreadsheet validation and data operations for the agent tool API."""
 
+import base64
 import csv
 from functools import wraps
 from io import StringIO
 from typing import NamedTuple
 
+from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
 from app.core import tool_errors
@@ -16,7 +18,9 @@ from app.document_engine.a1 import (
     parse_a1,
     quote_sheet_name,
 )
+from app.document_engine.providers.google_drive_base import DocNotFound, ExportTooLarge
 from app.document_engine.providers.google_sheets import (
+    SPREADSHEET_URL,
     GoogleSheetsProvider,
     SheetApiError,
     SpreadsheetNotFound,
@@ -26,6 +30,17 @@ from app.services import google_oauth_service
 READ_CELL_CAP = 200_000
 WRITE_CELL_CAP = 50_000
 CELL_TEXT_MAX = 50_000
+MAX_TAB_NAME_LENGTH = 100
+MAX_TABS = 50
+MAX_GRID_ROWS = 50_000
+MAX_GRID_COLUMNS = 500
+EXPORT_SIZE_LIMIT = 10 * 1024 * 1024
+
+SPREADSHEET_EXPORT_FORMATS = {
+    "csv": "text/csv",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pdf": "application/pdf",
+}
 
 
 class SheetTab(NamedTuple):
@@ -70,6 +85,22 @@ def _resolve_sheet(tabs: list[SheetTab], sheet: str | None) -> SheetTab:
     raise tool_errors.sheet_not_found(sheet, [tab.name for tab in tabs])
 
 
+def _check_tab_name(name) -> None:
+    if not isinstance(name, str) or not 1 <= len(name) <= MAX_TAB_NAME_LENGTH:
+        raise tool_errors.invalid_request("tab name must be 1-100 characters")
+
+
+def _check_duplicate_tab(name: str, tabs: list[SheetTab], exclude: SheetTab | None = None) -> None:
+    for tab in tabs:
+        if exclude is not None and tab.sheet_id == exclude.sheet_id:
+            continue
+        if tab.name.lower() == name.lower():
+            raise tool_errors.invalid_request(
+                f"a tab named '{name}' already exists; existing tabs: "
+                f"{', '.join(tab.name for tab in tabs)}"
+            )
+
+
 def _check_cells(rows, confirm: bool) -> int:
     if not isinstance(rows, list) or not rows or any(not isinstance(row, list) for row in rows):
         raise tool_errors.invalid_request("rows must be a non-empty 2D array")
@@ -107,17 +138,25 @@ def _check_read_size(r: A1Range, tab: SheetTab) -> None:
         raise tool_errors.sheet_too_large(cells)
 
 
+def _wrap_google_error(exc) -> tool_errors.ToolApiError:
+    """Map a provider Google error to a typed google_api_error tool error."""
+    if isinstance(exc, SheetApiError):
+        status, message = exc.status, str(exc)
+    else:  # raw HttpError from Drive-level operations
+        status = exc.resp.status if exc.resp is not None else None
+        message = f"Google Drive API {status}: {exc.reason}"
+    return tool_errors.google_api_error(403 if status == 403 else 502, message)
+
+
 def _sheet_errors(fn):
     @wraps(fn)
     def wrapped(db, tool_ctx, spreadsheet_id, *args, **kwargs):
         try:
             return fn(db, tool_ctx, spreadsheet_id, *args, **kwargs)
-        except SpreadsheetNotFound:
+        except (SpreadsheetNotFound, DocNotFound):
             raise tool_errors.spreadsheet_not_found(spreadsheet_id) from None
-        except SheetApiError as exc:
-            raise tool_errors.google_api_error(
-                403 if exc.status == 403 else 502, str(exc)
-            ) from None
+        except (SheetApiError, HttpError) as exc:
+            raise _wrap_google_error(exc) from None
 
     return wrapped
 
@@ -354,4 +393,291 @@ def find_replace(
         "spreadsheet_id": spreadsheet_id,
         "occurrences_changed": changed,
         "summary": f"Changed {changed} occurrences",
+    }
+
+
+# ---- Tab management ----
+
+
+def _check_grid_size(rows, cols) -> None:
+    if not isinstance(rows, int) or isinstance(rows, bool) or not 1 <= rows <= MAX_GRID_ROWS:
+        raise tool_errors.invalid_request(f"rows must be between 1 and {MAX_GRID_ROWS:,}")
+    if not isinstance(cols, int) or isinstance(cols, bool) or not 1 <= cols <= MAX_GRID_COLUMNS:
+        raise tool_errors.invalid_request(f"cols must be between 1 and {MAX_GRID_COLUMNS:,}")
+
+
+@_sheet_errors
+def add_sheet(db, tool_ctx, spreadsheet_id, name, rows=1000, cols=26) -> dict:
+    _check_tab_name(name)
+    _check_grid_size(rows, cols)
+    provider = _provider(db, tool_ctx)
+    tabs = _tabs(provider.get_spreadsheet(spreadsheet_id))
+    _check_duplicate_tab(name, tabs)
+    provider.batch_update(
+        spreadsheet_id,
+        [
+            {
+                "addSheet": {
+                    "properties": {
+                        "title": name,
+                        "gridProperties": {"rowCount": rows, "columnCount": cols},
+                    }
+                }
+            }
+        ],
+    )
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "sheet": name,
+        "summary": f"Added tab '{name}' with {rows} rows and {cols} columns",
+    }
+
+
+@_sheet_errors
+def update_sheet(db, tool_ctx, spreadsheet_id, name, new_name=None, hidden=None) -> dict:
+    if new_name is None and hidden is None:
+        raise tool_errors.invalid_request("nothing to update: provide new_name and/or hidden")
+    if hidden is not None and not isinstance(hidden, bool):
+        raise tool_errors.invalid_request("hidden must be a boolean")
+    if new_name is not None:
+        _check_tab_name(new_name)
+    provider = _provider(db, tool_ctx)
+    tabs = _tabs(provider.get_spreadsheet(spreadsheet_id))
+    tab = _resolve_sheet(tabs, name)
+    if new_name is not None:
+        _check_duplicate_tab(new_name, tabs, exclude=tab)
+    properties: dict = {"sheetId": tab.sheet_id}
+    fields = []
+    if new_name is not None:
+        properties["title"] = new_name
+        fields.append("title")
+    if hidden is not None:
+        properties["hidden"] = hidden
+        fields.append("hidden")
+    provider.batch_update(
+        spreadsheet_id,
+        [{"updateSheetProperties": {"properties": properties, "fields": ",".join(fields)}}],
+    )
+    if new_name is not None and hidden is not None:
+        summary = f"Renamed tab '{name}' to '{new_name}' and {'hidden' if hidden else 'unhidden'}"
+    elif new_name is not None:
+        summary = f"Renamed tab '{name}' to '{new_name}'"
+    else:
+        summary = f"{'Hidden' if hidden else 'Unhidden'} tab '{name}'"
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "sheet": new_name if new_name is not None else name,
+        "summary": summary,
+    }
+
+
+@_sheet_errors
+def delete_sheet(db, tool_ctx, spreadsheet_id, name, confirm=False) -> dict:
+    provider = _provider(db, tool_ctx)
+    tabs = _tabs(provider.get_spreadsheet(spreadsheet_id))
+    tab = _resolve_sheet(tabs, name)
+    if len(tabs) == 1:
+        raise tool_errors.invalid_request("cannot delete the only tab in the spreadsheet")
+    if not confirm:
+        raise tool_errors.confirmation_required(
+            {"sheet": name, "rows": tab.row_count, "columns": tab.column_count}
+        )
+    provider.batch_update(spreadsheet_id, [{"deleteSheet": {"sheetId": tab.sheet_id}}])
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "sheet": name,
+        "summary": f"Deleted tab '{name}'",
+    }
+
+
+# ---- Spreadsheet-level operations ----
+
+
+@_sheet_errors
+def get_spreadsheet(db, tool_ctx, spreadsheet_id) -> dict:
+    provider = _provider(db, tool_ctx)
+    meta = provider.get_spreadsheet(spreadsheet_id)
+    file_meta = provider.get_file_metadata(spreadsheet_id)
+    resolved_id = meta.get("spreadsheetId", spreadsheet_id)
+    return {
+        "spreadsheet_id": resolved_id,
+        "title": file_meta.get("name") or meta.get("properties", {}).get("title", ""),
+        "url": SPREADSHEET_URL.format(resolved_id),
+        "modified_time": file_meta.get("modified_time", ""),
+        "sheets": [
+            {
+                "name": tab.name,
+                "sheet_id": tab.sheet_id,
+                "rows": tab.row_count,
+                "columns": tab.column_count,
+                "hidden": tab.hidden,
+            }
+            for tab in _tabs(meta)
+        ],
+    }
+
+
+@_sheet_errors
+def create_spreadsheet(db, tool_ctx, title, sheets=None, folder_id=None) -> dict:
+    names = []
+    if sheets is not None:
+        if not isinstance(sheets, list) or any(not isinstance(n, str) for n in sheets):
+            raise tool_errors.invalid_request("sheets must be a list of tab name strings")
+        if len(sheets) > MAX_TABS:
+            raise tool_errors.invalid_request(
+                f"at most {MAX_TABS} tab names allowed; got {len(sheets)}"
+            )
+        tabs_so_far: list[SheetTab] = []
+        for index, tab_name in enumerate(sheets):
+            _check_tab_name(tab_name)
+            _check_duplicate_tab(tab_name, tabs_so_far)
+            tabs_so_far.append(SheetTab(tab_name, index, 0, 0, False))
+            names.append(tab_name)
+    provider = _provider(db, tool_ctx)
+    try:
+        created = provider.create_spreadsheet(title, names)
+        spreadsheet_id = created.get("spreadsheetId", "")
+        if folder_id:
+            provider.move_file(spreadsheet_id, folder_id)
+    except (SheetApiError, HttpError) as exc:
+        raise _wrap_google_error(exc) from None
+    except DocNotFound:
+        raise tool_errors.invalid_request(
+            f"folder {folder_id} not found or not accessible (drive.file scope: only "
+            "app-created or Picker-granted items are visible)"
+        ) from None
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "url": created.get("spreadsheetUrl") or SPREADSHEET_URL.format(spreadsheet_id),
+        "title": title,
+        "sheets": [
+            sheet.get("properties", {}).get("title", "") for sheet in created.get("sheets", [])
+        ],
+    }
+
+
+def search_spreadsheets(db, tool_ctx, query="", limit=10, folder_id=None) -> list[dict]:
+    provider = _provider(db, tool_ctx)
+    try:
+        return provider.search_spreadsheets(query, limit, folder_id)
+    except (SheetApiError, HttpError) as exc:
+        raise _wrap_google_error(exc) from None
+
+
+@_sheet_errors
+def trash_spreadsheet(db, tool_ctx, spreadsheet_id, confirm=False) -> dict:
+    if not confirm:
+        raise tool_errors.confirmation_required(
+            {
+                "operation": "delete",
+                "spreadsheet_id": spreadsheet_id,
+                "effect": "Moves the spreadsheet to Google Drive trash (recoverable in Drive).",
+            }
+        )
+    provider = _provider(db, tool_ctx)
+    provider.trash_document(spreadsheet_id)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "url": SPREADSHEET_URL.format(spreadsheet_id),
+        "summary": "Spreadsheet moved to Google Drive trash",
+    }
+
+
+@_sheet_errors
+def restore_spreadsheet(db, tool_ctx, spreadsheet_id) -> dict:
+    provider = _provider(db, tool_ctx)
+    provider.untrash_document(spreadsheet_id)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "url": SPREADSHEET_URL.format(spreadsheet_id),
+        "summary": "Spreadsheet restored from Google Drive trash",
+    }
+
+
+@_sheet_errors
+def rename_spreadsheet(db, tool_ctx, spreadsheet_id, title) -> dict:
+    provider = _provider(db, tool_ctx)
+    provider.rename_file(spreadsheet_id, title)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "url": SPREADSHEET_URL.format(spreadsheet_id),
+        "summary": f"Renamed spreadsheet to '{title}'",
+    }
+
+
+@_sheet_errors
+def move_spreadsheet(db, tool_ctx, spreadsheet_id, folder_id, remove_current=True) -> dict:
+    provider = _provider(db, tool_ctx)
+    try:
+        provider.move_file(spreadsheet_id, folder_id, remove_current)
+    except DocNotFound as exc:
+        if folder_id in str(exc):
+            raise tool_errors.invalid_request(
+                f"folder {folder_id} not found or not accessible (drive.file scope: only "
+                "app-created or Picker-granted items are visible)"
+            ) from None
+        raise
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "url": SPREADSHEET_URL.format(spreadsheet_id),
+        "summary": f"Moved spreadsheet into folder {folder_id}",
+    }
+
+
+@_sheet_errors
+def copy_spreadsheet(db, tool_ctx, spreadsheet_id, title=None) -> dict:
+    provider = _provider(db, tool_ctx)
+    provider.get_spreadsheet(spreadsheet_id)
+    copied = provider.copy_spreadsheet(spreadsheet_id, title)
+    return {
+        "spreadsheet_id": copied["id"],
+        "url": copied["url"],
+        "summary": f"Copied spreadsheet as '{copied['name']}'",
+    }
+
+
+@_sheet_errors
+def share_spreadsheet(db, tool_ctx, spreadsheet_id, email, role, notify=True) -> dict:
+    provider = _provider(db, tool_ctx)
+    provider.get_spreadsheet(spreadsheet_id)
+    permission = provider.share_file(spreadsheet_id, email, role, notify)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "permission_id": permission["id"],
+        "email": email,
+        "role": role,
+        "summary": f"Shared spreadsheet with {email} as {role}",
+    }
+
+
+@_sheet_errors
+def list_spreadsheet_permissions(db, tool_ctx, spreadsheet_id) -> list[dict]:
+    provider = _provider(db, tool_ctx)
+    provider.get_spreadsheet(spreadsheet_id)
+    return provider.list_permissions(spreadsheet_id)
+
+
+@_sheet_errors
+def export_spreadsheet(db, tool_ctx, spreadsheet_id, file_format) -> dict:
+    mime = SPREADSHEET_EXPORT_FORMATS.get(file_format)
+    if mime is None:
+        raise tool_errors.invalid_request("format must be 'csv', 'xlsx', or 'pdf'")
+    provider = _provider(db, tool_ctx)
+    provider.get_spreadsheet(spreadsheet_id)
+    try:
+        data = provider.export_file(spreadsheet_id, mime)
+    except ExportTooLarge:
+        raise tool_errors.invalid_request(
+            "Export too large: exceeds Google's 10MB export limit"
+        ) from None
+    if len(data) > EXPORT_SIZE_LIMIT:
+        raise tool_errors.invalid_request(
+            f"Export too large ({len(data)} bytes); limit is {EXPORT_SIZE_LIMIT} bytes"
+        )
+    return {
+        "format": file_format,
+        "mime": mime,
+        "size_bytes": len(data),
+        "content_base64": base64.b64encode(data).decode("ascii"),
+        "filename": f"spreadsheet.{file_format}",
     }

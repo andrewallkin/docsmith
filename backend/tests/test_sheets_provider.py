@@ -26,6 +26,9 @@ class StubSheets:
     def values(self):
         return self
 
+    def files(self):
+        return self
+
     def __getattr__(self, name):
         def request(**kwargs):
             self.calls.append((name, kwargs))
