@@ -23,7 +23,7 @@ class InvalidRangeError(ValueError):
 def col_index(letters: str) -> int:
     """Convert ASCII column letters to a 1-based column index."""
     if not re.fullmatch(r"[A-Za-z]+", letters):
-        raise InvalidRangeError(f"invalid column {letters!r}: expected column letters")
+        raise InvalidRangeError(f"invalid column '{letters}': expected column letters")
     result = 0
     for letter in letters.upper():
         result = result * 26 + ord(letter) - ord("A") + 1
@@ -72,14 +72,22 @@ def parse_a1(text: str) -> A1Range:
             raise invalid("sheet name is empty")
     elif "!" in source:
         sheet, body = source.split("!", 1)
+        if ":" in sheet:
+            raise invalid("bare sheet name contains ':'; quote the sheet name")
         if not sheet or re.search(r"[\s'!]", sheet):
             raise invalid("invalid sheet name; quote names containing spaces or apostrophes")
 
     parts = body.split(":")
-    if not body or len(parts) > 2:
+    if not body:
+        raise invalid("range is empty")
+    if len(parts) > 2:
         raise invalid("expected a cell or a range with two endpoints")
-    if any(not part for part in parts):
-        raise invalid("range endpoint is unbounded; specify both endpoints")
+    if not parts[0] or (len(parts) == 2 and not parts[1]):
+        which = "start" if not parts[0] else "end"
+        raise invalid(
+            f"{which} row and column are unbounded; specify both endpoints or "
+            "omit the range for the whole tab"
+        )
 
     def row_number(digits: str) -> int:
         try:
@@ -94,9 +102,9 @@ def parse_a1(text: str) -> A1Range:
         letters, row, row_only = match.groups()
         if row_only is not None:
             return "row", row_number(row_only), 1
+        if len(letters) > 13:
+            raise invalid(f"column '{part}' exceeds Google's grid limit (max 13 letters)")
         column = col_index(letters)
-        if column > 500:
-            raise invalid(f"column {letters!r} exceeds the 500-column limit")
         if row:
             return "cell", row_number(row), column
         return "column", 1, column
@@ -109,8 +117,14 @@ def parse_a1(text: str) -> A1Range:
     else:
         end_kind, end_row, end_col = endpoint(parts[1])
     if start_kind != end_kind:
+        missing = []
+        for name, kind in (("start", start_kind), ("end", end_kind)):
+            if kind == "column":
+                missing.append(f"{name} row is unbounded")
+            elif kind == "row":
+                missing.append(f"{name} column is unbounded")
         raise invalid(
-            "range endpoints must both be cells, columns, or rows; an endpoint is unbounded"
+            "; ".join(missing) + "; specify a full range or omit the range for the whole tab"
         )
     if start_row < 1 or end_row < 1:
         raise invalid("row numbers must be positive")
@@ -128,7 +142,12 @@ def format_a1(r: A1Range) -> str:
     prefix = ""
     if r.sheet is not None:
         sheet = r.sheet
-        if not re.fullmatch(r"[A-Za-z0-9_]+", sheet):
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_]+", sheet)
+            or sheet[0].isdigit()
+            or re.fullmatch(r"[A-Za-z]+[0-9]+", sheet)
+            or re.fullmatch(r"[Rr][0-9]+[Cc][0-9]+", sheet)
+        ):
             sheet = "'" + sheet.replace("'", "''") + "'"
         prefix = f"{sheet}!"
     if r.end_row == 0:
