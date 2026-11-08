@@ -299,6 +299,44 @@ def test_delete_spreadsheet_confirm_two_step(client, active_key, fake):
     assert fake.trashed is True
 
 
+def test_delete_spreadsheet_no_body_defaults_unconfirmed(client, active_key, fake):
+    res = client.post(
+        f"{BASE}/spreadsheets/sheet1/delete",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert fake.trashed is False
+
+    res = client.post(
+        f"{BASE}/spreadsheets/sheet1/delete",
+        json={"confirm": True},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+    assert fake.trashed is True
+
+
+def test_delete_tab_no_body_defaults_unconfirmed(client, active_key, fake):
+    res = client.request(
+        "DELETE",
+        f"{BASE}/spreadsheets/sheet1/sheets/Data",
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 422
+    assert not any(
+        call[0] == "batch_update" and any("deleteSheet" in r for r in call[2])
+        for call in fake.calls
+    )
+
+    res = client.request(
+        "DELETE",
+        f"{BASE}/spreadsheets/sheet1/sheets/Data",
+        json={"confirm": True},
+        headers={"Authorization": f"Bearer {active_key}"},
+    )
+    assert res.status_code == 200
+
+
 def test_export_endpoint(client, active_key, fake):
     res = client.get(
         f"{BASE}/spreadsheets/sheet1/export",

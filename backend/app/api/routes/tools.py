@@ -101,7 +101,7 @@ Destructive operations (regenerate, delete, folder delete) require
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | /api/v1/tools/spreadsheets | Create a spreadsheet (optional sheets list, folder_id) |
+| POST | /api/v1/tools/spreadsheets | Create spreadsheet. `sheets` lists tabs (omit = "Sheet1"). |
 | POST | /api/v1/tools/spreadsheets/search | Search spreadsheets (query, folder_id, limit) |
 | GET | /api/v1/tools/spreadsheets/{id} | Get metadata: title, url, tabs (name, rows, columns) |
 | POST | /api/v1/tools/spreadsheets/{id}/delete | Trash spreadsheet (requires confirm: true) |
@@ -473,11 +473,11 @@ def get_spreadsheet(
 @router.post("/spreadsheets/{spreadsheet_id}/delete", response_model=SpreadsheetMutationResponse)
 def delete_spreadsheet(
     spreadsheet_id: str,
-    payload: SpreadsheetDeleteRequest,
+    payload: SpreadsheetDeleteRequest | None = None,
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
     result = sheet_service.trash_spreadsheet(
-        tool_ctx.db, tool_ctx, spreadsheet_id, payload.confirm
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.confirm if payload else False
     )
     return SpreadsheetMutationResponse(**result)
 
@@ -675,10 +675,10 @@ def update_sheet(
 def delete_sheet(
     spreadsheet_id: str,
     sheet_name: str,
-    payload: SheetDeleteRequest,
+    payload: SheetDeleteRequest | None = None,
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
     result = sheet_service.delete_sheet(
-        tool_ctx.db, tool_ctx, spreadsheet_id, sheet_name, payload.confirm
+        tool_ctx.db, tool_ctx, spreadsheet_id, sheet_name, payload.confirm if payload else False
     )
     return SheetMutationResponse(**result)
