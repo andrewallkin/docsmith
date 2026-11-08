@@ -138,6 +138,266 @@ Reads are capped at 200,000 cells per request — page large tabs with the
 Folder endpoints (/folders) and the move/copy/rename/share operations above
 work identically for spreadsheets. Creating a doc or a spreadsheet accepts
 an optional `folder_id` to file it immediately.
+
+All examples below use `curl` with `Authorization: Bearer $KEY` (replace
+`$KEY` with your `ds_live_...` key and `$BASE` with the base URL). JSON
+responses include a `summary` field describing what happened.
+
+## Examples — Documents
+
+### Example — search docs
+```bash
+curl -X POST $BASE/api/v1/tools/documents/search \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"query": "weekly report", "limit": 10}'
+```
+
+### Example — read a doc
+```bash
+curl $BASE/api/v1/tools/documents/$DOC_ID \\
+  -H "Authorization: Bearer $KEY"
+```
+
+### Example — create a doc from markdown
+```bash
+curl -X POST $BASE/api/v1/tools/documents \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"title": "Weekly report", "markdown": "# Weekly report\\n\\nAll good."}'
+```
+
+### Example — create or return existing by title
+```bash
+curl -X POST $BASE/api/v1/tools/documents/get-or-create \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"title": "Weekly report", "markdown": "# Weekly report"}'
+```
+
+### Example — replace a section
+```bash
+curl -X PATCH $BASE/api/v1/tools/documents/$DOC_ID \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"update": {"replace_section": {"heading": "Weekly report",
+    "markdown": "# Weekly report\\n\\nUpdated text."}}}'
+```
+
+### Example — append markdown
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/append \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"markdown": "## New section\\n\\nAppended at the end."}'
+```
+
+### Example — move doc to trash
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/delete \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"confirm": true}'
+```
+
+### Example — restore from trash
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/restore \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'
+```
+
+### Example — rename a doc
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/rename \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"name": "Q3 Weekly report"}'
+```
+
+### Example — move doc into a folder
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/move \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"folder_id": "folder123"}'
+```
+
+### Example — copy a doc
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/copy \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"title": "Weekly report (copy)"}'
+```
+
+### Example — share with an email
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/share \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"email": "person@example.com", "role": "writer"}'
+```
+
+### Example — list sharing permissions
+```bash
+curl $BASE/api/v1/tools/documents/$DOC_ID/share \\
+  -H "Authorization: Bearer $KEY"
+```
+
+### Example — list comments
+```bash
+curl $BASE/api/v1/tools/documents/$DOC_ID/comments \\
+  -H "Authorization: Bearer $KEY"
+```
+
+### Example — add a comment
+```bash
+curl -X POST $BASE/api/v1/tools/documents/$DOC_ID/comments \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"comment": "Please review section 2."}'
+```
+
+### Example — export as PDF
+```bash
+curl "$BASE/api/v1/tools/documents/$DOC_ID/export?format=pdf" \\
+  -H "Authorization: Bearer $KEY"
+```
+
+## Examples — Spreadsheets
+
+### Example — create a spreadsheet
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"title": "Budget", "sheets": ["Data", "Summary"]}'
+```
+`Sheets` lists the tabs to create (omit for one "Sheet1"). Response returns
+`spreadsheet_id` and `url`.
+
+### Example — search spreadsheets
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/search \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"query": "Budget"}'
+```
+
+### Example — get metadata (tabs, grid sizes)
+```bash
+curl $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID \\
+  -H "Authorization: Bearer $KEY"
+```
+
+### Example — write rows with headings
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/values \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"sheet": "Data", "range": "A1",
+    "rows": [["Item", "Qty", "Price"], ["Apple", 4, 1.5], ["Bread", 2, 2.25]]}'
+```
+
+### Example — write a formula (user_entered recalculates)
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/values \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"sheet": "Data", "range": "D2", "rows": [["=SUM(B2:B10)"]]}'
+```
+
+### Example — read values
+```bash
+curl "$BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/values?sheet=Data&range=A1:D10&mode=values" \\
+  -H "Authorization: Bearer $KEY"
+```
+`mode` is `values` (computed), `formulas` (formula strings), or `both`.
+`format` is `json`, `csv`, or `markdown`. Omit `range` to read the whole tab.
+
+### Example — append rows
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/values/append \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"sheet": "Data", "rows": [["Milk", 3, 1.1]]}'
+```
+
+### Example — clear a range
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/values/clear \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"sheet": "Data", "range": "A2:D10", "confirm": true}'
+```
+
+### Example — find and replace
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/find-replace \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"find": "Fruit", "replace": "Produce", "confirm": true}'
+```
+Omit `sheet` to search all tabs.
+
+### Example — add a tab
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/sheets \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"name": "Archive", "rows": 500, "columns": 10}'
+```
+
+### Example — rename or hide a tab
+```bash
+curl -X PATCH $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/sheets/Data \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"name": "Inputs", "hidden": false}'
+```
+
+### Example — delete a tab
+```bash
+curl -X DELETE $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/sheets/Archive \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"confirm": true}'
+```
+
+### Example — trash a spreadsheet
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/delete \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"confirm": true}'
+```
+
+### Example — restore from trash
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/restore \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}'
+```
+
+### Example — rename / move / copy
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/rename \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"name": "Budget 2026"}'
+```
+`move` takes `{"folder_id": "..."}`, `copy` optionally takes `{"title": "..."}`.
+
+### Example — share a spreadsheet
+```bash
+curl -X POST $BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/share \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"email": "person@example.com", "role": "reader"}'
+```
+
+### Example — export csv / xlsx / pdf
+```bash
+curl "$BASE/api/v1/tools/spreadsheets/$SPREADSHEET_ID/export?format=xlsx" \\
+  -H "Authorization: Bearer $KEY"
+```
+
+## Examples — Folders
+
+### Example — create a folder
+```bash
+curl -X POST $BASE/api/v1/tools/folders \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"name": "Reports"}'
+```
+
+### Example — list folders
+```bash
+curl $BASE/api/v1/tools/folders \\
+  -H "Authorization: Bearer $KEY"
+```
+
+### Example — move folder to trash
+```bash
+curl -X POST $BASE/api/v1/tools/folders/$FOLDER_ID/delete \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"confirm": true}'
+```
 """
 
 

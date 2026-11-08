@@ -671,6 +671,14 @@ def test_tool_docs_public(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/markdown")
     assert "tools/documents/search" in resp.text
+    # Every endpoint has a usage example
+    assert resp.text.count("### Example") >= 30
+    assert "curl -X POST" in resp.text
+    # Spreadsheet examples cover formulas, append, find-replace, tabs
+    assert "=SUM(B2:B10)" in resp.text
+    assert "values/append" in resp.text
+    assert "find-replace" in resp.text
+    assert "/sheets/{name}" in resp.text
 
 
 def test_tool_info_public(client):
