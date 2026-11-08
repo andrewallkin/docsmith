@@ -122,10 +122,23 @@ export default function ApiKeysCard() {
                   {key.key_prefix}…
                 </td>
                 <td className="py-2 pr-4 text-slate-500">
-                  {new Date(key.created_at).toLocaleDateString()}
+                  {new Intl.DateTimeFormat('en-GB', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                  }).format(new Date(key.created_at))}
                 </td>
                 <td className="py-2 pr-4 text-slate-500">
-                  {key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never'}
+                  {key.last_used_at
+                    ? new Intl.DateTimeFormat('en-GB', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                      }).format(new Date(key.last_used_at))
+                    : 'Never'}
                 </td>
                 <td className="py-2 pr-4">
                   {key.revoked_at ? (
