@@ -517,7 +517,6 @@ def get_spreadsheet(db, tool_ctx, spreadsheet_id) -> dict:
     }
 
 
-@_sheet_errors
 def create_spreadsheet(db, tool_ctx, title, sheets=None, folder_id=None) -> dict:
     names = []
     if sheets is not None:
