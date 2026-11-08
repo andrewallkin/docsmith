@@ -109,7 +109,7 @@ Destructive operations (regenerate, delete, folder delete) require
 | POST | /api/v1/tools/spreadsheets/{id}/rename | Rename a spreadsheet |
 | POST | /api/v1/tools/spreadsheets/{id}/move | Move spreadsheet into a folder |
 | POST | /api/v1/tools/spreadsheets/{id}/copy | Copy a spreadsheet (optional new title) |
-| POST | /api/v1/tools/spreadsheets/{id}/share | Share spreadsheet with an email (reader/writer) |
+| POST | /api/v1/tools/spreadsheets/{id}/share | Share spreadsheet (reader/writer/commenter) |
 | GET | /api/v1/tools/spreadsheets/{id}/share | List sharing permissions |
 | GET | /api/v1/tools/spreadsheets/{id}/export?format=csv\|xlsx\|pdf | Export as base64 |
 | GET | /api/v1/tools/spreadsheets/{id}/values | Read values (query: sheet, range, mode, format) |
