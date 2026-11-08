@@ -103,9 +103,20 @@ def upsert_connection(
 def get_credentials(db: Session, connection: GoogleConnection) -> Credentials:
     """Return refreshed credentials; access token lives in memory only."""
     settings = get_settings()
+    try:
+        refresh_token = encryption.decrypt(connection.encrypted_refresh_token)
+    except ValueError as exc:
+        # The stored token can't be decrypted (e.g. the encryption key was
+        # rotated since the connection was made). Mark the connection
+        # disconnected so the dashboard offers a fresh connect instead of
+        # every Google call 500ing.
+        logger.warning("Stored Google token is undecryptable; marking disconnected")
+        connection.disconnected_at = datetime.now(UTC)
+        db.commit()
+        raise GoogleReconnectRequired() from exc
     creds = Credentials(
         token=None,
-        refresh_token=encryption.decrypt(connection.encrypted_refresh_token),
+        refresh_token=refresh_token,
         token_uri=TOKEN_URL,
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,

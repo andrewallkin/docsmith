@@ -101,7 +101,8 @@ def read_document(db: Session, tool_ctx, document_id: str) -> dict:
 
 
 def create_document(
-    db: Session, tool_ctx, title: str, markdown: str, theme_name: str | None
+    db: Session, tool_ctx, title: str, markdown: str, theme_name: str | None,
+    folder_id: str | None = None,
 ) -> dict:
     provider = _provider(db, tool_ctx)
     theme = get_theme(theme_name)
@@ -109,6 +110,14 @@ def create_document(
     blocks = ast.children
     created = provider.create_document(title)
     document_id = created["documentId"]
+    if folder_id:
+        try:
+            provider.move_file(document_id, folder_id)
+        except DocNotFound:
+            raise tool_errors.invalid_request(
+                f"folder {folder_id} not found or not accessible (drive.file scope: only "
+                "app-created or Picker-granted items are visible)"
+            ) from None
     steps, doc_style = render_new_document(
         AstDocument(title=title, children=blocks), theme
     )
