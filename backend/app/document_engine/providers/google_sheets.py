@@ -3,6 +3,7 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from app.document_engine.a1 import quote_sheet_name
 from app.document_engine.providers.google_drive_base import (
     MAX_ATTEMPTS,
     RETRYABLE_STATUS,
@@ -18,6 +19,10 @@ class SpreadsheetNotFound(Exception):
 class SheetApiError(Exception):
     """A Sheets API request failed or could not be constructed."""
 
+    def __init__(self, message: str, status: int | None = None):
+        self.status = status
+        super().__init__(message)
+
 
 def _sheets_request(call, *, spreadsheet_id: str | None = None, read: bool = False):
     try:
@@ -28,9 +33,10 @@ def _sheets_request(call, *, spreadsheet_id: str | None = None, read: bool = Fal
             raise SpreadsheetNotFound(spreadsheet_id) from exc
         if status == 403:
             raise SheetApiError(
-                "Google Sheets API 403: the file isn't accessible to the connected account."
+                "Google Sheets API 403: the file isn't accessible to the connected account.",
+                status=status,
             ) from exc
-        raise SheetApiError(f"Google Sheets API {status}: {exc.reason}") from exc
+        raise SheetApiError(f"Google Sheets API {status}: {exc.reason}", status=status) from exc
 
 
 class GoogleSheetsProvider(DriveFileOps):
@@ -113,7 +119,7 @@ class GoogleSheetsProvider(DriveFileOps):
                 .values()
                 .append(
                     spreadsheetId=spreadsheet_id,
-                    range=f"{sheet}!A1",
+                    range=f"{quote_sheet_name(sheet)}!A1",
                     insertDataOption="INSERT_ROWS",
                     valueInputOption="USER_ENTERED",
                     body={"values": rows},

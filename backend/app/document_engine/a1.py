@@ -137,19 +137,21 @@ def parse_a1(text: str) -> A1Range:
     return A1Range(sheet, start_row, start_col, end_row, end_col)
 
 
+def quote_sheet_name(name: str) -> str:
+    """Quote sheet names that are ambiguous or invalid in bare A1 notation."""
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_]+", name)
+        or name[0].isdigit()
+        or re.fullmatch(r"[A-Za-z]+[0-9]+", name)
+        or re.fullmatch(r"[Rr][0-9]+[Cc][0-9]+", name)
+    ):
+        return "'" + name.replace("'", "''") + "'"
+    return name
+
+
 def format_a1(r: A1Range) -> str:
     """Format an A1Range using canonical column letters and sheet quoting."""
-    prefix = ""
-    if r.sheet is not None:
-        sheet = r.sheet
-        if (
-            not re.fullmatch(r"[A-Za-z0-9_]+", sheet)
-            or sheet[0].isdigit()
-            or re.fullmatch(r"[A-Za-z]+[0-9]+", sheet)
-            or re.fullmatch(r"[Rr][0-9]+[Cc][0-9]+", sheet)
-        ):
-            sheet = "'" + sheet.replace("'", "''") + "'"
-        prefix = f"{sheet}!"
+    prefix = f"{quote_sheet_name(r.sheet)}!" if r.sheet is not None else ""
     if r.end_row == 0:
         body = f"{col_letter(r.start_col)}:{col_letter(r.end_col)}"
     elif r.end_col == 0:

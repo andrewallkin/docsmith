@@ -5,12 +5,14 @@ from types import SimpleNamespace
 import pytest
 from googleapiclient.errors import HttpError
 
+from app.core.tool_errors import ToolApiError
 from app.document_engine.providers import google_sheets
 from app.document_engine.providers.google_sheets import (
     GoogleSheetsProvider,
     SheetApiError,
     SpreadsheetNotFound,
 )
+from app.services import sheet_service
 
 
 class StubSheets:
@@ -167,6 +169,17 @@ def test_append_uses_insert_rows_and_returns_updated_range(provider):
     ]
 
 
+@pytest.mark.parametrize(
+    ("sheet", "range_a1"),
+    [("Tab", "Tab!A1"), ("My Data", "'My Data'!A1"), ("It's Data", "'It''s Data'!A1")],
+)
+def test_append_quotes_sheet_name(provider, sheet, range_a1):
+    sheets, client, _, _ = provider
+    client.responses = [{"updates": {"updatedRange": range_a1}}]
+    sheets.append_values("id", sheet, [[1]])
+    assert client.calls[0][1]["range"] == range_a1
+
+
 def test_clear_values_sends_range(provider):
     sheets, client, _, _ = provider
     assert sheets.clear_values("id", "Tab!A1:B2") is None
@@ -297,6 +310,20 @@ def test_google_errors_are_translated(provider, method, args, status):
         assert "accessible" in str(caught.value) and "account" in str(caught.value)
     else:
         assert "400" in str(caught.value) and "Bad request" in str(caught.value)
+
+
+@pytest.mark.parametrize(("google_status", "tool_status"), [(403, 403), (400, 502)])
+def test_sheet_service_preserves_permission_error_and_maps_other_failures(
+    provider, monkeypatch, google_status, tool_status
+):
+    sheets, client, _, _ = provider
+    client.responses = [http_error(google_status, "Bad request")]
+    monkeypatch.setattr(sheet_service, "_provider", lambda db, ctx: sheets)
+    with pytest.raises(ToolApiError) as exc:
+        sheet_service.read_values(None, None, "id")
+    assert exc.value.code == "google_api_error"
+    assert exc.value.status_code == tool_status
+    assert str(google_status) in exc.value.message
 
 
 @pytest.mark.parametrize(

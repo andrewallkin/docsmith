@@ -8,7 +8,14 @@ from typing import NamedTuple
 from sqlalchemy.orm import Session
 
 from app.core import tool_errors
-from app.document_engine.a1 import A1Range, InvalidRangeError, col_letter, format_a1, parse_a1
+from app.document_engine.a1 import (
+    A1Range,
+    InvalidRangeError,
+    col_letter,
+    format_a1,
+    parse_a1,
+    quote_sheet_name,
+)
 from app.document_engine.providers.google_sheets import (
     GoogleSheetsProvider,
     SheetApiError,
@@ -79,6 +86,8 @@ def _check_cells(rows, confirm: bool) -> int:
                 raise tool_errors.invalid_request(
                     f"row {i}, cell {j}: text exceeds {CELL_TEXT_MAX} characters"
                 )
+    if not total:
+        raise tool_errors.invalid_request("rows must contain at least one cell")
     if total > WRITE_CELL_CAP and not confirm:
         raise tool_errors.confirmation_required({"total_cells": total, "cap": WRITE_CELL_CAP})
     return total
@@ -106,7 +115,9 @@ def _sheet_errors(fn):
         except SpreadsheetNotFound:
             raise tool_errors.spreadsheet_not_found(spreadsheet_id) from None
         except SheetApiError as exc:
-            raise tool_errors.ToolApiError("google_api_error", 502, str(exc)) from None
+            raise tool_errors.google_api_error(
+                403 if exc.status == 403 else 502, str(exc)
+            ) from None
 
     return wrapped
 
@@ -132,6 +143,26 @@ def _qualified_range(r: A1Range, tab: SheetTab) -> str:
 
 def _whole_tab_size(tab: SheetTab) -> None:
     _check_read_size(A1Range(None, 1, 1, 0, 0), tab)
+
+
+def _check_bounds(r: A1Range, tab: SheetTab, range_str: str) -> None:
+    if (r.end_row and r.end_row > tab.row_count) or (r.end_col and r.end_col > tab.column_count):
+        raise tool_errors.invalid_request(
+            f"range {range_str} exceeds bounds (max column {col_letter(tab.column_count)}, "
+            f"max row {tab.row_count})"
+        )
+
+
+def _preview_ranges(tab: SheetTab):
+    if tab.row_count * tab.column_count <= READ_CELL_CAP:
+        yield quote_sheet_name(tab.name)
+        return
+    for start_col in range(1, tab.column_count + 1, READ_CELL_CAP):
+        end_col = min(tab.column_count, start_col + READ_CELL_CAP - 1)
+        rows_per_chunk = READ_CELL_CAP // (end_col - start_col + 1)
+        for start_row in range(1, tab.row_count + 1, rows_per_chunk):
+            end_row = min(tab.row_count, start_row + rows_per_chunk - 1)
+            yield format_a1(A1Range(tab.name, start_row, start_col, end_row, end_col))
 
 
 def _markdown_table(values: list[list]) -> str:
@@ -166,16 +197,10 @@ def read_values(
     tab = _resolve_sheet(_tabs(meta), sheet)
     if parsed is None:
         _whole_tab_size(tab)
-        range_a1 = tab.name
+        range_a1 = quote_sheet_name(tab.name)
     else:
         range_a1 = _qualified_range(parsed, tab)
-        if (parsed.end_row and parsed.end_row > tab.row_count) or (
-            parsed.end_col and parsed.end_col > tab.column_count
-        ):
-            raise tool_errors.invalid_request(
-                f"range {range_str} exceeds bounds (max column {col_letter(tab.column_count)}, "
-                f"max row {tab.row_count})"
-            )
+        _check_bounds(parsed, tab, range_str)
         _check_read_size(parsed, tab)
     formulas = None
     if mode == "values":
@@ -218,15 +243,25 @@ def write_values(
         raise tool_errors.invalid_request(
             "writes require an explicit cell range like A1:D10 or a single cell"
         )
+    data_end_row = parsed.start_row + len(rows) - 1
+    data_end_col = parsed.start_col + max(map(len, rows)) - 1
+    single_cell = parsed.start_row == parsed.end_row and parsed.start_col == parsed.end_col
+    if not single_cell and (data_end_row > parsed.end_row or data_end_col > parsed.end_col):
+        raise tool_errors.invalid_request(
+            f"rows exceed range {range_str}: row extent ends at row {data_end_row}, "
+            f"column {col_letter(data_end_col)}"
+        )
+    end_row = max(parsed.end_row, data_end_row)
+    end_col = max(parsed.end_col, data_end_col)
     provider = _provider(db, tool_ctx)
     tab = _resolve_sheet(_tabs(provider.get_spreadsheet(spreadsheet_id)), sheet)
     range_a1 = _qualified_range(parsed, tab)
-    if parsed.end_row > tab.row_count or parsed.end_col > tab.column_count:
+    if end_row > tab.row_count or end_col > tab.column_count:
         provider.ensure_grid(
             spreadsheet_id,
             tab.sheet_id,
-            max(tab.row_count, parsed.end_row),
-            max(tab.column_count, parsed.end_col),
+            max(tab.row_count, end_row),
+            max(tab.column_count, end_col),
         )
     updated = provider.update_values(spreadsheet_id, range_a1, rows, mode)
     return {
@@ -260,6 +295,7 @@ def clear_values(db, tool_ctx, spreadsheet_id, sheet, range_str, confirm=False) 
     provider = _provider(db, tool_ctx)
     tab = _resolve_sheet(_tabs(provider.get_spreadsheet(spreadsheet_id)), sheet)
     range_a1 = _qualified_range(parsed, tab)
+    _check_bounds(parsed, tab, range_str)
     if not confirm:
         raise tool_errors.confirmation_required(
             {
@@ -299,18 +335,17 @@ def find_replace(
         _resolve_sheet(tabs, None)
     targets = [_resolve_sheet(tabs, sheet)] if sheet is not None else tabs
     if not confirm:
-        for tab in targets:
-            _whole_tab_size(tab)
         needle = find if match_case else find.lower()
         occurrences = 0
         for tab in targets:
-            for row in provider.get_values(spreadsheet_id, tab.name):
-                for cell in row:
-                    value = "" if cell is None else str(cell)
-                    value = value if match_case else value.lower()
-                    matches = value == needle if whole_cell else needle in value
-                    if matches:
-                        occurrences += 1
+            for range_a1 in _preview_ranges(tab):
+                for row in provider.get_values(spreadsheet_id, range_a1):
+                    for cell in row:
+                        value = "" if cell is None else str(cell)
+                        value = value if match_case else value.lower()
+                        matches = value == needle if whole_cell else needle in value
+                        if matches:
+                            occurrences += 1
         raise tool_errors.confirmation_required(
             {"occurrences": occurrences, "sheet": sheet or "all tabs"}
         )

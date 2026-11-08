@@ -1,5 +1,6 @@
 import pytest
 
+from app.document_engine import a1
 from app.document_engine.a1 import (
     A1Range,
     InvalidRangeError,
@@ -8,6 +9,19 @@ from app.document_engine.a1 import (
     format_a1,
     parse_a1,
 )
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Data", "Data"),
+        ("My Data", "'My Data'"),
+        ("It's Data", "'It''s Data'"),
+        ("Sheet1", "'Sheet1'"),
+    ],
+)
+def test_quote_sheet_name(name, expected):
+    assert a1.quote_sheet_name(name) == expected
 
 
 @pytest.mark.parametrize(

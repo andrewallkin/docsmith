@@ -35,6 +35,10 @@ def google_reconnect_required() -> ToolApiError:
     )
 
 
+def google_api_error(status: int, message: str) -> ToolApiError:
+    return ToolApiError("google_api_error", status, message)
+
+
 def doc_not_found(doc_id: str) -> ToolApiError:
     return ToolApiError(
         "doc_not_found",
