@@ -20,6 +20,8 @@ from app.schemas.tools import (
     DocumentSummary,
     DocumentUpdateRequest,
     ExportResponse,
+    FindReplaceRequest,
+    FindReplaceResponse,
     FolderCreateRequest,
     FolderCreateResponse,
     FolderDeleteRequest,
@@ -30,8 +32,31 @@ from app.schemas.tools import (
     ShareListResponse,
     ShareRequest,
     ShareResponse,
+    SheetAddRequest,
+    SheetDeleteRequest,
+    SheetMutationResponse,
+    SheetUpdateRequest,
+    SpreadsheetCopyRequest,
+    SpreadsheetCreateRequest,
+    SpreadsheetCreateResponse,
+    SpreadsheetDeleteRequest,
+    SpreadsheetMetaResponse,
+    SpreadsheetMoveRequest,
+    SpreadsheetMutationResponse,
+    SpreadsheetOut,
+    SpreadsheetRenameRequest,
+    SpreadsheetSearchRequest,
+    SpreadsheetSearchResponse,
+    SpreadsheetShareResponse,
+    ValuesAppendRequest,
+    ValuesAppendResponse,
+    ValuesClearRequest,
+    ValuesClearResponse,
+    ValuesReadResponse,
+    ValuesWriteRequest,
+    ValuesWriteResponse,
 )
-from app.services import document_service
+from app.services import document_service, sheet_service
 
 router = APIRouter(prefix="/v1/tools", tags=["tools"])
 
@@ -43,7 +68,7 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 |---|---|---|
 | POST | /api/v1/tools/documents/search | Search (query, full_text, folder_id; empty lists all) |
 | GET | /api/v1/tools/documents/{id} | Read content (markdown) + outline |
-| POST | /api/v1/tools/documents | Create a Google Doc from markdown |
+| POST | /api/v1/tools/documents | Create a Google Doc from markdown (optional folder_id) |
 | POST | /api/v1/tools/documents/get-or-create | Create a doc, or return existing with same title |
 | PATCH | /api/v1/tools/documents/{id} | Update: replace_section or regenerate |
 | POST | /api/v1/tools/documents/{id}/append | Append markdown at end of doc |
@@ -71,6 +96,48 @@ Rename/move/copy/share/comments/folder ops do not accept required_revision_id
 (metadata ops don't change the revision).
 Destructive operations (regenerate, delete, folder delete) require
 `confirm: true` or return 422 with a preview.
+
+## Spreadsheets
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | /api/v1/tools/spreadsheets | Create a spreadsheet (optional sheets list, folder_id) |
+| POST | /api/v1/tools/spreadsheets/search | Search spreadsheets (query, folder_id, limit) |
+| GET | /api/v1/tools/spreadsheets/{id} | Get metadata: title, url, tabs (name, rows, columns) |
+| POST | /api/v1/tools/spreadsheets/{id}/delete | Trash spreadsheet (requires confirm: true) |
+| POST | /api/v1/tools/spreadsheets/{id}/restore | Restore spreadsheet from trash |
+| POST | /api/v1/tools/spreadsheets/{id}/rename | Rename a spreadsheet |
+| POST | /api/v1/tools/spreadsheets/{id}/move | Move spreadsheet into a folder |
+| POST | /api/v1/tools/spreadsheets/{id}/copy | Copy a spreadsheet (optional new title) |
+| POST | /api/v1/tools/spreadsheets/{id}/share | Share spreadsheet with an email (reader/writer) |
+| GET | /api/v1/tools/spreadsheets/{id}/share | List sharing permissions |
+| GET | /api/v1/tools/spreadsheets/{id}/export?format=csv\|xlsx\|pdf | Export as base64 |
+| GET | /api/v1/tools/spreadsheets/{id}/values | Read values (query: sheet, range, mode, format) |
+| POST | /api/v1/tools/spreadsheets/{id}/values | Write rows to a range |
+| POST | /api/v1/tools/spreadsheets/{id}/values/append | Append rows to a tab |
+| POST | /api/v1/tools/spreadsheets/{id}/values/clear | Clear a range (requires confirm: true) |
+| POST | /api/v1/tools/spreadsheets/{id}/find-replace | Find and replace (requires confirm: true) |
+| POST | /api/v1/tools/spreadsheets/{id}/sheets | Add a tab (name, rows, cols) |
+| PATCH | /api/v1/tools/spreadsheets/{id}/sheets/{name} | Rename or hide/unhide a tab |
+| DELETE | /api/v1/tools/spreadsheets/{id}/sheets/{name} | Delete a tab (requires confirm: true) |
+
+A1 notation: `Sheet1!A1:D10` is a rectangle, `A:D` is a whole column, and a
+whole tab is read by omitting `range`. Writes require an explicit bounded
+range like A1:D10 or a single cell. Formulas: send `{"sheet": "Sheet1",
+"range": "F2", "rows": [["=SUM(B2:B10)"]]}` — the default `mode` is
+`user_entered`, so Google recalculates the formula on write.
+
+Destructive spreadsheet operations require `confirm: true` (otherwise 422
+with a preview, nothing changed): values/clear, find-replace, delete tab
+(DELETE .../sheets/{name}), delete spreadsheet.
+
+Writes beyond the current grid grow it automatically; reads beyond it fail.
+Reads are capped at 200,000 cells per request — page large tabs with the
+`range` parameter.
+
+Folder endpoints (/folders) and the move/copy/rename/share operations above
+work identically for spreadsheets. Creating a doc or a spreadsheet accepts
+an optional `folder_id` to file it immediately.
 """
 
 
@@ -93,7 +160,7 @@ Full endpoint reference: GET {base}/api/v1/tools/docs (no auth, markdown).
 Core operations:
 - POST tools/documents/search — search/list docs
 - GET tools/documents/{{id}} — read a doc as markdown
-- POST tools/documents — create a doc from markdown
+- POST tools/documents — create a doc from markdown (optional folder_id)
 - POST tools/documents/get-or-create — create or return existing by title
 - PATCH tools/documents/{{id}} — replace a section or regenerate
 - POST tools/documents/{{id}}/append — append markdown
@@ -101,7 +168,11 @@ Core operations:
 - GET/POST tools/documents/{{id}}/comments — read/add comments
 - POST tools/documents/{{id}}/export?format=pdf — export as base64 PDF
 - POST/GET tools/folders — create/list Drive folders
-- Destructive ops (delete, regenerate, folder delete) need `confirm: true`.
+- tools/spreadsheets — CRUD on Google Sheets: create/search, values
+  read/write/append, tabs, export, share (writes auto-grow the grid)
+- Destructive ops (delete, regenerate, folder delete) need `confirm: true`;
+  so do spreadsheet values/clear, find-replace, delete tab, delete
+  spreadsheet.
 """
 
 
@@ -146,7 +217,8 @@ def create_document(
     tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
 ):
     result = document_service.create_document(
-        tool_ctx.db, tool_ctx, payload.title, payload.markdown, payload.theme
+        tool_ctx.db, tool_ctx, payload.title, payload.markdown, payload.theme,
+        payload.folder_id,
     )
     return MutationResponse(**result)
 
@@ -357,3 +429,256 @@ def add_comment(
         tool_ctx.db, tool_ctx, document_id, payload.content
     )
     return CommentResponse(**result)
+
+
+# ---- spreadsheets ----
+
+
+@router.post("/spreadsheets", response_model=SpreadsheetCreateResponse, status_code=201)
+def create_spreadsheet(
+    payload: SpreadsheetCreateRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.create_spreadsheet(
+        tool_ctx.db, tool_ctx, payload.title, payload.sheets, payload.folder_id
+    )
+    return SpreadsheetCreateResponse(
+        spreadsheet_id=result["spreadsheet_id"],
+        url=result["url"],
+        summary=f"Created spreadsheet '{result['title']}'",
+        sheets=result["sheets"],
+    )
+
+
+@router.post("/spreadsheets/search", response_model=SpreadsheetSearchResponse)
+def search_spreadsheets(
+    payload: SpreadsheetSearchRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    results = sheet_service.search_spreadsheets(
+        tool_ctx.db, tool_ctx, payload.query, payload.limit, folder_id=payload.folder_id
+    )
+    return SpreadsheetSearchResponse(spreadsheets=[SpreadsheetOut(**s) for s in results])
+
+
+@router.get("/spreadsheets/{spreadsheet_id}", response_model=SpreadsheetMetaResponse)
+def get_spreadsheet(
+    spreadsheet_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.get_spreadsheet(tool_ctx.db, tool_ctx, spreadsheet_id)
+    return SpreadsheetMetaResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/delete", response_model=SpreadsheetMutationResponse)
+def delete_spreadsheet(
+    spreadsheet_id: str,
+    payload: SpreadsheetDeleteRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.trash_spreadsheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.confirm
+    )
+    return SpreadsheetMutationResponse(**result)
+
+
+@router.post(
+    "/spreadsheets/{spreadsheet_id}/restore", response_model=SpreadsheetMutationResponse
+)
+def restore_spreadsheet(
+    spreadsheet_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.restore_spreadsheet(tool_ctx.db, tool_ctx, spreadsheet_id)
+    return SpreadsheetMutationResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/rename", response_model=SpreadsheetMutationResponse)
+def rename_spreadsheet(
+    spreadsheet_id: str,
+    payload: SpreadsheetRenameRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.rename_spreadsheet(tool_ctx.db, tool_ctx, spreadsheet_id, payload.title)
+    return SpreadsheetMutationResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/move", response_model=SpreadsheetMutationResponse)
+def move_spreadsheet(
+    spreadsheet_id: str,
+    payload: SpreadsheetMoveRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.move_spreadsheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.folder_id, payload.remove_current
+    )
+    return SpreadsheetMutationResponse(**result)
+
+
+@router.post(
+    "/spreadsheets/{spreadsheet_id}/copy",
+    response_model=SpreadsheetMutationResponse,
+    status_code=201,
+)
+def copy_spreadsheet(
+    spreadsheet_id: str,
+    payload: SpreadsheetCopyRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.copy_spreadsheet(tool_ctx.db, tool_ctx, spreadsheet_id, payload.title)
+    return SpreadsheetMutationResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/share", response_model=SpreadsheetShareResponse)
+def share_spreadsheet(
+    spreadsheet_id: str,
+    payload: ShareRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.share_spreadsheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.email, payload.role, payload.notify
+    )
+    return SpreadsheetShareResponse(**result)
+
+
+@router.get("/spreadsheets/{spreadsheet_id}/share", response_model=ShareListResponse)
+def list_spreadsheet_permissions(
+    spreadsheet_id: str,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    permissions = sheet_service.list_spreadsheet_permissions(tool_ctx.db, tool_ctx, spreadsheet_id)
+    return ShareListResponse(permissions=[PermissionOut(**p) for p in permissions])
+
+
+@router.get("/spreadsheets/{spreadsheet_id}/export", response_model=ExportResponse)
+def export_spreadsheet(
+    spreadsheet_id: str,
+    format: str = Query(default="csv"),
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.export_spreadsheet(tool_ctx.db, tool_ctx, spreadsheet_id, format)
+    return ExportResponse(**result)
+
+
+@router.get("/spreadsheets/{spreadsheet_id}/values", response_model=ValuesReadResponse)
+def read_values(
+    spreadsheet_id: str,
+    sheet: str | None = None,
+    range: str | None = Query(default=None, max_length=200),
+    mode: str = Query(default="values"),
+    format: str = Query(default="json"),
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.read_values(
+        tool_ctx.db, tool_ctx, spreadsheet_id, sheet, range, mode, format
+    )
+    return ValuesReadResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/values", response_model=ValuesWriteResponse)
+def write_values(
+    spreadsheet_id: str,
+    payload: ValuesWriteRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.write_values(
+        tool_ctx.db,
+        tool_ctx,
+        spreadsheet_id,
+        payload.sheet,
+        payload.range,
+        payload.rows,
+        payload.mode,
+        payload.confirm,
+    )
+    return ValuesWriteResponse(**result)
+
+
+@router.post(
+    "/spreadsheets/{spreadsheet_id}/values/append", response_model=ValuesAppendResponse
+)
+def append_values(
+    spreadsheet_id: str,
+    payload: ValuesAppendRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.append_values(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.sheet, payload.rows, payload.confirm
+    )
+    return ValuesAppendResponse(**result)
+
+
+@router.post(
+    "/spreadsheets/{spreadsheet_id}/values/clear", response_model=ValuesClearResponse
+)
+def clear_values(
+    spreadsheet_id: str,
+    payload: ValuesClearRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.clear_values(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.sheet, payload.range, payload.confirm
+    )
+    return ValuesClearResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/find-replace", response_model=FindReplaceResponse)
+def find_replace(
+    spreadsheet_id: str,
+    payload: FindReplaceRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.find_replace(
+        tool_ctx.db,
+        tool_ctx,
+        spreadsheet_id,
+        payload.find,
+        payload.replace,
+        sheet=payload.sheet,
+        match_case=payload.match_case,
+        whole_cell=payload.whole_cell,
+        confirm=payload.confirm,
+    )
+    return FindReplaceResponse(**result)
+
+
+@router.post("/spreadsheets/{spreadsheet_id}/sheets", response_model=SheetMutationResponse)
+def add_sheet(
+    spreadsheet_id: str,
+    payload: SheetAddRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.add_sheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, payload.name, payload.rows, payload.cols
+    )
+    return SheetMutationResponse(**result)
+
+
+@router.patch(
+    "/spreadsheets/{spreadsheet_id}/sheets/{sheet_name}", response_model=SheetMutationResponse
+)
+def update_sheet(
+    spreadsheet_id: str,
+    sheet_name: str,
+    payload: SheetUpdateRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.update_sheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, sheet_name, payload.new_name, payload.hidden
+    )
+    return SheetMutationResponse(**result)
+
+
+@router.delete(
+    "/spreadsheets/{spreadsheet_id}/sheets/{sheet_name}", response_model=SheetMutationResponse
+)
+def delete_sheet(
+    spreadsheet_id: str,
+    sheet_name: str,
+    payload: SheetDeleteRequest,
+    tool_ctx: ToolAuthContext = Depends(get_tool_auth_context),
+):
+    result = sheet_service.delete_sheet(
+        tool_ctx.db, tool_ctx, spreadsheet_id, sheet_name, payload.confirm
+    )
+    return SheetMutationResponse(**result)
