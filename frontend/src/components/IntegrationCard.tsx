@@ -94,14 +94,12 @@ export default function IntegrationCard() {
       <div className="mb-4 divide-y divide-slate-100 rounded-lg border border-slate-200">
         {GROUPS.map((group) => (
           <details key={group.label} className="group">
-            <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <span>
-                {group.label}{' '}
-                <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
-                  {group.endpoints.length}
-                </span>
+            <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <span className="flex-1">{group.label}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                {group.endpoints.length}
               </span>
-              <span className="text-xs text-slate-400 transition-transform group-open:rotate-180" aria-hidden="true">
+              <span className="w-4 text-xs text-slate-400 transition-transform group-open:rotate-180" aria-hidden="true">
                 ▾
               </span>
             </summary>
