@@ -687,3 +687,51 @@ def test_tool_info_public(client):
     assert resp.headers["content-type"].startswith("text/plain")
     assert "ds_live_" in resp.text
     assert "/api/v1/tools/docs" in resp.text
+
+
+def test_tool_error_carries_reauth_url(client, active_key, monkeypatch):
+    from app.services import google_oauth_service
+
+    def fake_get_credentials(db, connection):
+        raise google_oauth_service.GoogleReconnectRequired()
+
+    monkeypatch.setattr(google_oauth_service, "get_credentials", fake_get_credentials)
+    res = client.get(
+        "/api/v1/tools/documents/doc123", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 403
+    body = res.json()
+    assert body["error"] == "google_reconnect_required"
+    assert body["reauth_url"].startswith("https://accounts.google.com")
+    assert body["reauth_endpoint"] == "/api/v1/tools/google/reauth-url"
+
+
+def test_reauth_url_endpoint_required(client, active_key, monkeypatch):
+    from app.services import google_oauth_service
+
+    def fake_get_credentials(db, connection):
+        raise google_oauth_service.GoogleReconnectRequired()
+
+    monkeypatch.setattr(google_oauth_service, "get_credentials", fake_get_credentials)
+    res = client.get(
+        "/api/v1/tools/google/reauth-url", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["reauth_required"] is True
+    assert body["reauth_url"].startswith("https://accounts.google.com")
+
+
+def test_reauth_url_endpoint_not_required(client, active_key, monkeypatch):
+    from app.services import google_oauth_service
+
+    monkeypatch.setattr(
+        google_oauth_service, "get_credentials", lambda db, connection: object()
+    )
+    res = client.get(
+        "/api/v1/tools/google/reauth-url", headers={"Authorization": f"Bearer {active_key}"}
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["reauth_required"] is False
+    assert body["reauth_url"].startswith("https://accounts.google.com")

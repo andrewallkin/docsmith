@@ -29,6 +29,7 @@ from app.schemas.tools import (
     FolderOut,
     MutationResponse,
     PermissionOut,
+    ReauthUrlResponse,
     ShareListResponse,
     ShareRequest,
     ShareResponse,
@@ -85,6 +86,13 @@ Base URL: `{base}/api/v1` — all requests: `Authorization: Bearer ds_live_...`
 | POST | /api/v1/tools/folders | Create a Drive folder (optional parent_id) |
 | GET | /api/v1/tools/folders | List accessible Drive folders |
 | POST | /api/v1/tools/folders/{id}/delete | Move folder to trash (requires confirm: true) |
+| GET | /api/v1/tools/google/reauth-url | Get a Google re-auth URL (show it to the user) |
+
+Google refresh tokens can expire (testing-mode OAuth apps: every 7 days).
+When a call returns 403 `google_reconnect_required`, the JSON body includes
+`reauth_url` — show it to the user to reconnect (you can also fetch a fresh
+one from GET /api/v1/tools/google/reauth-url, which also reports
+`reauth_required: true/false`).
 
 Markdown supports: H1-H3 headings, bold/italic, links, ordered and unordered
 lists, tables, `---` page breaks. Optional theme: `professional` (default).
@@ -433,6 +441,8 @@ Core operations:
 - Destructive ops (delete, regenerate, folder delete) need `confirm: true`;
   so do spreadsheet values/clear, find-replace, delete tab, delete
   spreadsheet.
+- 403 google_reconnect_required means the user's Google token expired;
+  GET tools/google/reauth-url returns a link to show the user.
 """
 
 
@@ -442,6 +452,27 @@ def tool_info():
 
     base = get_settings().frontend_url
     return PlainTextResponse(TOOL_INFO.replace("{base}", base), media_type="text/plain")
+
+
+@router.get("/google/reauth-url", response_model=ReauthUrlResponse)
+def reauth_url(tool_ctx: ToolAuthContext = Depends(get_tool_auth_context)):
+    """Return a Google consent URL the agent can show the user to re-auth.
+
+    Google testing-mode refresh tokens expire every 7 days; when a tool call
+    fails with 403 google_reconnect_required, hit this endpoint and display
+    reauth_url to the user.
+    """
+    from app.services import google_oauth_service
+
+    reauth_required = False
+    try:
+        google_oauth_service.get_credentials(tool_ctx.db, tool_ctx.connection)
+    except google_oauth_service.GoogleReconnectRequired:
+        reauth_required = True
+    return ReauthUrlResponse(
+        reauth_required=reauth_required,
+        reauth_url=google_oauth_service.build_auth_url(tool_ctx.user.id),
+    )
 
 
 @router.post("/documents/search", response_model=DocumentSearchResponse)
