@@ -21,16 +21,31 @@ def connect(user: User = Depends(get_current_user)):
 
 @router.get("/callback")
 def callback(code: str, state: str, db: Session = Depends(get_db)):
-    """Exchange the OAuth code, store the encrypted refresh token, redirect."""
+    """Exchange the OAuth code, store the encrypted refresh token, redirect.
+
+    The failure reason is surfaced as &reason=<code> so a failed reauth is
+    not silent (the dashboard can show it; no secrets in these messages).
+    """
     try:
         user_id = google_oauth_service.decode_state(state)
+    except Exception:
+        return _error_redirect("invalid_state")
+    try:
         tokens = google_oauth_service.exchange_code(code)
+    except Exception:
+        return _error_redirect("token_exchange_failed")
+    try:
         scopes = (tokens.get("scope") or "").split(" ") if tokens.get("scope") else []
         google_oauth_service.upsert_connection(db, user_id, tokens, scopes)
-        result = "success"
     except Exception:
-        result = "error"
-    return RedirectResponse(url=f"{get_settings().frontend_url}/dashboard?google={result}")
+        return _error_redirect("connection_failed")
+    url = f"{get_settings().frontend_url}/dashboard?google=success"
+    return RedirectResponse(url=url)
+
+
+def _error_redirect(reason: str) -> RedirectResponse:
+    url = f"{get_settings().frontend_url}/dashboard?google=error&reason={reason}"
+    return RedirectResponse(url=url)
 
 
 @router.get("/status", response_model=GoogleConnectionStatus)

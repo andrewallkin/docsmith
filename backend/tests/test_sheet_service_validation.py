@@ -138,6 +138,9 @@ def test_provider_maps_reconnect_error(monkeypatch):
         raise google_oauth_service.GoogleReconnectRequired()
 
     monkeypatch.setattr(google_oauth_service, "get_credentials", get_credentials)
+    ctx = SimpleNamespace(connection=object(), user=SimpleNamespace(id="user-1"))
     with pytest.raises(tool_errors.ToolApiError) as exc:
-        sheets._provider(object(), SimpleNamespace(connection=object()))
+        sheets._provider(object(), ctx)
     assert (exc.value.code, exc.value.status_code) == ("google_reconnect_required", 403)
+    assert "reauth_url" in exc.value.extra
+    assert "accounts.google.com" in exc.value.extra["reauth_url"]

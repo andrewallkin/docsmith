@@ -9,10 +9,24 @@ interface ConnectionStatus {
   expired: boolean
 }
 
+const REASONS: Record<string, string> = {
+  invalid_state: 'the re-auth link expired or was already used — try again',
+  token_exchange_failed: 'Google rejected the authorization code — try again',
+  connection_failed: 'the connection could not be saved — try again',
+}
+
 export default function GoogleCard() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const [callbackError] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('google') !== 'error') return null
+    const reason = params.get('reason') ?? ''
+    window.history.replaceState(null, '', window.location.pathname)
+    return `Google re-authentication failed: ${REASONS[reason] ?? 'unknown error'}`
+  })
 
   const load = useCallback(() => {
     api
@@ -118,6 +132,7 @@ export default function GoogleCard() {
           </button>
         )}
       </div>
+      {callbackError && <p className="mt-3 text-sm text-red-600">{callbackError}</p>}
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
     </section>
   )

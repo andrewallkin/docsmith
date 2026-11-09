@@ -55,7 +55,9 @@ def _provider(db: Session, tool_ctx) -> GoogleSheetsProvider:
     try:
         credentials = google_oauth_service.get_credentials(db, tool_ctx.connection)
     except google_oauth_service.GoogleReconnectRequired:
-        raise tool_errors.google_reconnect_required() from None
+        raise tool_errors.google_reconnect_required(
+            google_oauth_service.build_auth_url(tool_ctx.user.id)
+        ) from None
     return GoogleSheetsProvider(credentials)
 
 

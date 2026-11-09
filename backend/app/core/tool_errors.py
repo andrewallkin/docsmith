@@ -26,12 +26,19 @@ def google_not_connected() -> ToolApiError:
     )
 
 
-def google_reconnect_required() -> ToolApiError:
+def google_reconnect_required(reauth_url: str | None = None) -> ToolApiError:
+    extra: dict[str, Any] | None = None
+    if reauth_url:
+        extra = {
+            "reauth_url": reauth_url,
+            "reauth_endpoint": "/api/v1/tools/google/reauth-url",
+        }
     return ToolApiError(
         "google_reconnect_required",
         403,
         "Google refresh token is expired or revoked (Testing-mode tokens expire after 7 days). "
-        "Reconnect Google in the dashboard.",
+        "Reconnect Google via reauth_url.",
+        extra,
     )
 
 

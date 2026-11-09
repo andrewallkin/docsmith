@@ -338,3 +338,8 @@ class SpreadsheetShareResponse(BaseModel):
     email: str
     role: str
     summary: str
+
+
+class ReauthUrlResponse(BaseModel):
+    reauth_required: bool
+    reauth_url: str
